@@ -10,6 +10,8 @@ venv/
 uv/
 .env
 *.egg-info/
+# Backup files
+*.bak
 # Ignore Windows alternate data stream Zone.Identifier files
 *:Zone.Identifier
 *:*:Zone.Identifier
