@@ -7,8 +7,13 @@ __pycache__/
 env/
 .venv/
 venv/
+uv/
 .env
 *.egg-info/
+# Ignore Windows alternate data stream Zone.Identifier files
+*:Zone.Identifier
+*:*:Zone.Identifier
+*.*:Zone.Identifier
 dist/
 build/
 .pytest_cache/
