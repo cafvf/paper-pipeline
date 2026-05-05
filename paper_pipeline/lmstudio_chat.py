@@ -30,7 +30,7 @@ class LLMCompletion(str):
 
 
 class ChatJsonClient(Protocol):
-    def complete_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> str | LLMCompletion: ..
+    def complete_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> str | LLMCompletion: ...
 
 
 @dataclass

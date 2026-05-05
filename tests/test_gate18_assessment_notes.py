@@ -192,5 +192,5 @@ def test_render_note_from_assessment_formats_unstructured_suggestions_as_human_t
         current_collection=".ToLook",
     )
     assert "- Tipo: `methodology_check`; Conhecimento: Verificar consistencia matematica." in note
-    assert "matematica." not in note
+    assert note.count("matematica.") == 1  # should appear exactly once, in the formatted suggestion
     assert "{'type':" not in note

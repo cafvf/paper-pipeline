@@ -25,11 +25,11 @@ class ZoteroItem:
 
 
 class ZoteroSource(Protocol):
-    def list_candidates(self) -> list[CandidatePaper]: ..
+    def list_candidates(self) -> list[CandidatePaper]: ...
 
 
 class ZoteroPlanWriter(Protocol):
-    def apply_plan(self, plan: ZoteroActionPlan) -> dict: ..
+    def apply_plan(self, plan: ZoteroActionPlan) -> dict: ...
 
 
 class MemoryZoteroAdapter:

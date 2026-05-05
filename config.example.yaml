@@ -1,10 +1,40 @@
-vault_root: "<VAULT_ROOT_PATH>"  # e.g. /path/to/vault or C:\path\to\vault
-papers_dir: "<PAPERS_DIR_PATH>"  # optional, defaults to <VAULT_ROOT_PATH>/x/LLM/papers
-zotero:
-  api_key: "YOUR_ZOTERO_API_KEY"
-  user_id: "YOUR_USER_ID"
+# Obsidian vault used for inbox notes, literature notes, templates, and lexical context.
+# Use "." only when you intentionally want those notes inside this repository.
+vault_root: "."
+
+# Runtime artifacts live in this standalone repository by default.
+paths:
+  llm_root: "."
+  papers_root: "papers"
+  index_root: "index"
+  # inbox_dir and templates_dir are resolved relative to vault_root unless absolute.
+  inbox_dir: "+"
+  templates_dir: "templates"
+
 lmstudio:
-  url: "http://localhost:8080"
-  api_key: "YOUR_LMSTUDIO_KEY"
-dry_run: true
-log_dir: "./logs"
+  chat_endpoint: "http://127.0.0.1:1234/v1/chat/completions"
+  embeddings_endpoint: "http://127.0.0.1:1234/v1/embeddings"
+  analysis_model: "qwen/qwen3.5-9b"
+  embedding_model: ""
+  timeout_seconds: 1200
+  embedding_timeout_seconds: 60
+  embeddings_enabled: true
+  fallback_to_lexical: true
+  max_output_tokens: 8192
+  tolook_max_output_tokens: 2048
+  tolook_timeout_seconds: 1200
+  deep_stage_max_output_tokens: 8192
+  deep_stage_timeout_seconds: 2400
+  save_payloads: false
+
+operational_collections:
+  tolook:
+    - ".ToLook"
+  torevise:
+    - ".To Revise"
+  todig:
+    - ".ToDig"
+    - ".To Dig"
+  expendable:
+    - "Expendable"
+    - ".Expendable"

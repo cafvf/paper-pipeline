@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 
-from paper_pipeline.contracts import Stage
 from paper_pipeline.zotero_api import ZoteroApiAdapter, ZoteroApiError
 
 

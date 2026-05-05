@@ -11,7 +11,7 @@ from .lmstudio_chat import LMStudioChatClient
 from .runner import run_once
 from .selection import select_batch
 from .vault_index import build_lexical_index
-from .zotero_api import ZoteroApiAdapter
+from .zotero_api import ZoteroApiAdapter, ZoteroApiError
 from .zotero_collections import resolve_operational_collections
 
 
@@ -119,7 +119,12 @@ def _run_cycle(args) -> int:
         config = _with_max_output_tokens(config, args.max_output_tokens)
     if getattr(args, "save_llm_payloads", False):
         config = _with_save_lm_payloads(config)
-    adapter = ZoteroApiAdapter.from_env()
+    try:
+        adapter = ZoteroApiAdapter.from_env()
+    except ZoteroApiError:
+        if not getattr(args, "dry_run", False):
+            raise
+        adapter = _NoopSource()
     source = _CitekeyFilteredSource(
         _VaultCitekeySource(_StageFilteredSource(adapter, _stage_from_cli(args.stage)), config.paths.vault_root),
         getattr(args, "citekey", None),

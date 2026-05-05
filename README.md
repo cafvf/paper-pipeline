@@ -1,48 +1,55 @@
 # paper-pipeline
 
-Pipeline de ingestão e avaliação de artigos extraído da pasta `x/LLM` de um cofre.
+Pipeline standalone para ingestao, triagem e avaliacao de artigos com Zotero,
+LM Studio e notas em um cofre Obsidian.
 
 ## Objetivo
-Tornar o pipeline standalone, configurável pela variável `VAULT_ROOT` e executável localmente.
 
-## Quickstart (substitua os placeholders por caminhos reais)
+Manter o codigo e os artefatos de runtime fora do cofre. O repositorio guarda
+`paper_pipeline/`, testes, configuracao, `papers/` e `index/`; o cofre
+Obsidian fica configurado separadamente como fonte/destino de notas.
 
-1) Copiar código do cofre (excluir a pasta de `papers`):
+## Quickstart
 
-Windows (PowerShell):
+1. Instale as dependencias:
 
-   $VaultRoot = 'C:\path\to\vault'   # substitua
-   $Dest = 'C:\path\to\dest'         # diretório de destino
-   New-Item -ItemType Directory -Path $Dest -Force
-   robocopy "$VaultRoot\x\LLM" $Dest /E /XD "papers" ".venv" "__pycache__"
+   ```bash
+   uv sync
+   ```
 
-Linux / macOS (bash):
+2. Copie a configuracao de exemplo:
 
-   export VAULT_ROOT=/path/to/vault
-   DEST=/path/to/dest
-   mkdir -p "$DEST"
-   rsync -av --exclude 'papers' --exclude '.venv' --exclude '__pycache__' "$VAULT_ROOT/x/LLM/" "$DEST/"
+   ```bash
+   cp config.example.yaml config.yaml
+   ```
 
-2) Ajustar imports (se necessário):
+3. Edite `config.yaml`.
 
-   python tools/refactor_imports.py "<DEST>"
+   Defina `vault_root` para o caminho do seu cofre Obsidian quando quiser que
+   inbox, notas de literatura e contexto lexical sejam lidos/escritos no cofre.
+   Os caminhos em `paths.llm_root`, `paths.papers_root` e `paths.index_root`
+   ficam relativos ao arquivo de configuracao e, por padrao, apontam para este
+   repositorio.
 
-3) Criar venv `uv` e instalar dependências:
+4. Rode os testes:
 
-   python -m venv uv
-   # Windows
-   .\\uv\\Scripts\\Activate.ps1
-   # Linux / macOS
-   source uv/bin/activate
-   pip install -r requirements.txt
+   ```bash
+   uv run pytest -q
+   ```
 
-4) Teste rápido:
+5. Teste o CLI:
 
-   pytest -q
-   python cli.py --dry-run
+   ```bash
+   uv run paper-pipeline run --config config.yaml --dry-run
+   ```
 
-## Configuração
-Copie `config.example.yaml` → `config.yaml` e preencha `vault_root`, chaves Zotero/LMStudio e outras opções.
+## Migracao Do Layout Antigo
 
-## Licença
+Este repositorio nao espera mais existir dentro de `x/LLM`. Referencias antigas
+a `x/LLM/pipeline_config.example.yaml`, `x/LLM/papers` ou execucao com
+`cwd="x/LLM"` devem apontar para a raiz do repositorio e para
+`config.example.yaml`.
+
+## Licenca
+
 MIT

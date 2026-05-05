@@ -18,6 +18,6 @@ repos:
         pass_filenames: false
       - id: gitleaks-local
         name: gitleaks local scan
-        entry: tools/run_gitleaks.bat
-        language: system
+        entry: python tools/run_gitleaks.py
+        language: python
         pass_filenames: false

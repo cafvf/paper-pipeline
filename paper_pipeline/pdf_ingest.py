@@ -30,7 +30,7 @@ class PdfConversionPlan:
 class PdfConverter(Protocol):
     name: str
 
-    def convert(self, pdf_path: Path) -> str | dict: ..
+    def convert(self, pdf_path: Path) -> str | dict: ...
 
 
 def build_pdf_manifest(pdf_path: str | Path) -> PdfManifest:

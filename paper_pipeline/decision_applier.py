@@ -22,7 +22,7 @@ from .zotero_plan import ZoteroActionPlan
 
 
 class ZoteroPlanApplier(Protocol):
-    def apply_plan(self, plan: ZoteroActionPlan) -> dict: ..
+    def apply_plan(self, plan: ZoteroActionPlan) -> dict: ...
 
 
 @dataclass

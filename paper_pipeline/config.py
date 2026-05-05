@@ -57,15 +57,14 @@ class RuntimeConfig:
 
 def default_config(vault_root: str | Path = ".") -> RuntimeConfig:
     root = Path(vault_root).resolve()
-    llm = root / "x" / "LLM"
     return RuntimeConfig(
         paths=PathsConfig(
             vault_root=root,
-            llm_root=llm,
-            papers_root=llm / "papers",
-            index_root=llm / "index",
+            llm_root=root,
+            papers_root=root / "papers",
+            index_root=root / "index",
             inbox_dir=root / "+",
-            templates_dir=root / "x" / "Templates",
+            templates_dir=root / "templates",
         )
     )
 
@@ -76,19 +75,20 @@ def load_config(path: str | Path | None = None, *, vault_root: str | Path = ".")
         return cfg
     raw_path = Path(path)
     raw = _load_mapping(raw_path)
-    root = _resolve_config_root(raw_path, raw.get("vault_root", cfg.paths.vault_root))
-    llm = root / "x" / "LLM"
+    config_root = raw_path.parent.resolve()
+    root = _resolve(config_root, raw.get("vault_root", cfg.paths.vault_root))
     paths_raw = dict(raw.get("paths", {}))
+    llm = _resolve(config_root, paths_raw.get("llm_root", config_root))
     lmstudio_raw = dict(raw.get("lmstudio", {}))
     collections_raw = dict(raw.get("operational_collections", {}))
     return RuntimeConfig(
         paths=PathsConfig(
             vault_root=root,
-            llm_root=_resolve(root, paths_raw.get("llm_root", llm)),
-            papers_root=_resolve(root, paths_raw.get("papers_root", llm / "papers")),
-            index_root=_resolve(root, paths_raw.get("index_root", llm / "index")),
+            llm_root=llm,
+            papers_root=_resolve(config_root, paths_raw.get("papers_root", llm / "papers")),
+            index_root=_resolve(config_root, paths_raw.get("index_root", llm / "index")),
             inbox_dir=_resolve(root, paths_raw.get("inbox_dir", root / "+")),
-            templates_dir=_resolve(root, paths_raw.get("templates_dir", root / "x" / "Templates")),
+            templates_dir=_resolve(root, paths_raw.get("templates_dir", root / "templates")),
         ),
         lmstudio=LMStudioConfig(**lmstudio_raw),
         operational_collections=OperationalCollectionsConfig(**collections_raw),
@@ -100,13 +100,6 @@ def _resolve(root: Path, value: str | Path) -> Path:
     if path.is_absolute():
         return path.resolve()
     return (root / path).resolve()
-
-
-def _resolve_config_root(config_path: Path, value: str | Path) -> Path:
-    path = Path(value)
-    if path.is_absolute():
-        return path.resolve()
-    return (config_path.parent / path).resolve()
 
 
 def _load_mapping(path: Path) -> dict[str, Any]:

@@ -9,7 +9,8 @@ from paper_pipeline.contracts import CollectionAction, DecisionState, Stage, Val
 def test_default_config_resolves_vault_paths():
     cfg = default_config(".")
     assert cfg.paths.vault_root == Path(".").resolve()
-    assert cfg.paths.papers_root == Path("x/LLM/papers").resolve()
+    assert cfg.paths.llm_root == Path(".").resolve()
+    assert cfg.paths.papers_root == Path("papers").resolve()
     assert cfg.lmstudio.embedding_model == ""
     assert cfg.operational_collections.tolook == [".ToLook"]
 

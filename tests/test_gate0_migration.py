@@ -1,19 +1,20 @@
 from pathlib import Path
+import pytest
 
 
-def test_legacy_layout_exists():
-    root = Path("x/LLM")
-    assert (root / "legacy" / "local_paper_pipeline_runtime").is_dir()
-    assert (root / "legacy" / "tests").is_dir()
-    assert (root / "legacy" / "__lmstudio_pipeline_artifacts").is_dir()
-    assert (root / "legacy" / "root_docs").is_dir()
-
-
-def test_v2_roots_exist_and_old_plus_outputs_are_gone():
-    root = Path("x/LLM")
+@pytest.mark.integration
+def test_standalone_repository_layout_exists():
+    root = Path(".")
     assert (root / "paper_pipeline").is_dir()
-    assert (root / "papers").is_dir()
-    assert (root / "index").is_dir()
+    assert (root / "tests").is_dir()
+    assert (root / "tools").is_dir()
+    assert (root / "config.example.yaml").is_file()
+
+
+@pytest.mark.integration
+def test_old_vault_embedded_layout_is_gone():
+    root = Path(".")
+    assert not (root / "x" / "LLM").exists()
     assert not (root / "local_paper_pipeline_runtime").exists()
     assert not Path("+/outputs").exists()
     assert not list(Path("+").glob("Nightly Zotero Review*.md"))

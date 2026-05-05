@@ -8,7 +8,7 @@ import re
 from typing import Any
 
 from .artifacts import PaperArtifactStore
-from .contracts import FullDecision, KnowledgeAction, PipelineError, ValidationError, ensure_inside, normalize_citekey
+from .contracts import FullDecision, KnowledgeAction, PipelineError, ensure_inside, normalize_citekey
 from .llm_schema import LLMAssessment, parse_llm_assessment
 from .note_patcher import KnowledgePatch, apply_patch_plan, find_literature_note, plan_note_patch, safe_target_path
 from .vault_index import build_lexical_index, search_lexical
@@ -274,7 +274,7 @@ def _concept_suggestion_content(suggestion: dict[str, Any], assessment: LLMAsses
         "",
         "## Hipoteses e limites",
         f"- Assume: {suggestion.get('applicability', '') or 'Nao informado.'}",
-        f"- Ignora: Nao informado automaticamente.",
+        "- Ignora: Nao informado automaticamente.",
         f"- Quebra quando: {suggestion.get('limitations', '') or 'Nao informado.'}",
         "",
         "## Variantes e extensoes",

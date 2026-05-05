@@ -8,9 +8,9 @@ from .contracts import Stage, ValidationError
 
 
 class ZoteroCollectionsClient(Protocol):
-    def list_collections(self) -> list[dict]: ..
+    def list_collections(self) -> list[dict]: ...
 
-    def create_collection(self, name: str, parent_collection: str | None = None) -> dict: ..
+    def create_collection(self, name: str, parent_collection: str | None = None) -> dict: ...
 
 
 @dataclass(frozen=True)

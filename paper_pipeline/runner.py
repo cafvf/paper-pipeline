@@ -17,15 +17,15 @@ from .zotero_plan import ZoteroActionPlan, ZoteroItemState, build_zotero_action_
 
 
 class CandidateSource(Protocol):
-    def list_candidates(self) -> list[CandidatePaper]: ..
+    def list_candidates(self) -> list[CandidatePaper]: ...
 
 
 class PaperAnalyzer(Protocol):
-    def analyze(self, candidate: CandidatePaper, artifact_store: PaperArtifactStore) -> LLMAssessment | None: ..
+    def analyze(self, candidate: CandidatePaper, artifact_store: PaperArtifactStore) -> LLMAssessment | None: ...
 
 
 class ZoteroPlanApplier(Protocol):
-    def apply_plan(self, plan: ZoteroActionPlan) -> dict: ..
+    def apply_plan(self, plan: ZoteroActionPlan) -> dict: ...
 
 
 @dataclass

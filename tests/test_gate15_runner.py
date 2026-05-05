@@ -1,6 +1,5 @@
 from pathlib import Path
 
-from paper_pipeline.artifacts import PaperArtifactStore
 from paper_pipeline.config import default_config
 from paper_pipeline.contracts import CollectionAction, DecisionState, FullDecision, Stage
 from paper_pipeline.decision_notes import render_full_decision_note
@@ -77,7 +76,6 @@ def resolutions():
 def test_run_once_applies_existing_decisions_then_writes_new_decision_notes(tmp_path: Path):
     cfg = default_config(tmp_path)
     cfg.paths.inbox_dir.mkdir(parents=True)
-    store = PaperArtifactStore(cfg.paths.papers_root, "manual")
     note = cfg.paths.inbox_dir / "manual - LLM Paper Decision.md"
     note.write_text(
         "---\ntype: inbox\n---\n```yaml\ndecision_state: manual_only\nmissing_pdf_action: manual_only\nmanual_notes: done\n```\n",

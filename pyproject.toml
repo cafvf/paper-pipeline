@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "paper-pipeline"
 version = "0.1.0"
-description = "Paper ingestion and LLM assessment pipeline extracted from a vault (x/LLM)"
+description = "Standalone paper ingestion and LLM assessment pipeline"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -16,7 +16,14 @@ dependencies = [
   "rich>=12.0",
   "pymupdf>=1.22",
   "pypdf>=3.0",
+  "jsonschema>=4.0",
+  "pre-commit>=4.6.0",
+  "pytest>=9.0.3",
+  "ruff>=0.15.12",
+  "black>=26.3.1",
+  "bandit>=1.7.5",
+  "safety>=2.3.0",
 ]
 
 [project.scripts]
-paper-pipeline = "cli:main"
+paper-pipeline = "paper_pipeline.cli:main"

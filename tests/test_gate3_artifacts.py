@@ -34,8 +34,8 @@ def test_append_log_is_jsonl(tmp_path):
     assert json.loads(lines[0])["event"] == "started"
 
 
-def test_main_artifact_links_are_vault_relative(tmp_path):
-    store = PaperArtifactStore("x/LLM/papers", "paper2026")
+def test_main_artifact_links_are_runtime_relative():
+    store = PaperArtifactStore("papers", "paper2026")
     links = store.main_artifact_links("look", pdf_hash="abc", patch_plan_id="p1")
-    assert links["assessment"].startswith("x/LLM/")
+    assert links["assessment"].startswith("papers/")
     assert "conversion_report.json" in links["conversion_report"]

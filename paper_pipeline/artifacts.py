@@ -71,13 +71,16 @@ class PaperArtifactStore:
 
     def main_artifact_links(self, stage: str, pdf_hash: str | None = None, patch_plan_id: str | None = None) -> dict[str, str]:
         links = {
-            "assessment": _vault_link(self.root / "assessments" / f"{stage}_latest.json"),
-            "reading_packet": _vault_link(self.root / "reading_packets" / f"{stage}_latest.json"),
+            "assessment": _artifact_link(self.root / "assessments" / f"{stage}_latest.json", self.papers_root),
+            "reading_packet": _artifact_link(self.root / "reading_packets" / f"{stage}_latest.json", self.papers_root),
         }
         if pdf_hash:
-            links["conversion_report"] = _vault_link(self.root / "pdf" / "conversions" / pdf_hash / "conversion_report.json")
+            links["conversion_report"] = _artifact_link(
+                self.root / "pdf" / "conversions" / pdf_hash / "conversion_report.json",
+                self.papers_root,
+            )
         if patch_plan_id:
-            links["patch_plan"] = _vault_link(self.root / "patch_plans" / f"{patch_plan_id}.json")
+            links["patch_plan"] = _artifact_link(self.root / "patch_plans" / f"{patch_plan_id}.json", self.papers_root)
         return links
 
 
@@ -90,9 +93,14 @@ def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-def _vault_link(path: Path) -> str:
+def _artifact_link(path: Path, papers_root: Path) -> str:
     text = str(path).replace("\\", "/")
     marker = "/x/LLM/"
     if marker in text:
         return "x/LLM/" + text.split(marker, 1)[1]
+    try:
+        rel = path.resolve().relative_to(papers_root.resolve().parent)
+        return rel.as_posix()
+    except ValueError:
+        pass
     return text
