@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+import re
+from pathlib import Path
+import argparse
+
+PAT1 = re.compile(r'\bx\.LLM\.paper_pipeline\b')
+PAT_FROM = re.compile(r'\bfrom x\.LLM\.(\S+)')
+PAT_IMPORT = re.compile(r'\bimport x\.LLM\.(\S+)')
+
+def rewrite_file(p: Path):
+    text = p.read_text(encoding="utf-8")
+    new = text
+    new = PAT1.sub('paper_pipeline', new)
+    new = PAT_FROM.sub(r'from \1', new)
+    new = PAT_IMPORT.sub(r'import \1', new)
+    new = new.replace('.', '.')
+    if new != text:
+        bak = p.with_suffix(p.suffix + '.bak')
+        bak.write_text(text, encoding="utf-8")
+        p.write_text(new, encoding="utf-8")
+        print("Rewrote", p)
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("root", help="root folder to scan")
+    args = parser.parse_args()
+    root = Path(args.root)
+    for p in root.rglob("*.py"):
+        if any(part in ("__pycache__", ".venv", "venv") for part in p.parts):
+            continue
+        rewrite_file(p)
+
+if __name__ == "__main__":
+    main()

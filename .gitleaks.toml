@@ -1,0 +1,5 @@
+title = "gitleaks config for paper-pipeline"
+
+[[allowlist]]
+description = "Allow the test token string 'secret' used in unit tests"
+regex = '''secret'''

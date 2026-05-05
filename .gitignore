@@ -1,3 +1,4 @@
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -216,3 +217,42 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+=======
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+.venv/
+venv/
+uv/
+.env
+*.egg-info/
+# Backup files
+*.bak
+# Ignore Windows alternate data stream Zone.Identifier files
+*:Zone.Identifier
+*:*:Zone.Identifier
+*.*:Zone.Identifier
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.cache/
+# OS
+Thumbs.db
+.DS_Store
+# IDE
+.vscode/
+.idea/
+# Logs and artifacts
+logs/
+*.log
+# Data / large files
+papers/
+*.pdf
+*.sqlite
+# pipenv
+Pipfile.lock

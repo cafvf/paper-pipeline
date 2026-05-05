@@ -1,0 +1,10 @@
+vault_root: "<VAULT_ROOT_PATH>"  # e.g. /path/to/vault or C:\path\to\vault
+papers_dir: "<PAPERS_DIR_PATH>"  # optional, defaults to <VAULT_ROOT_PATH>/x/LLM/papers
+zotero:
+  api_key: "YOUR_ZOTERO_API_KEY"
+  user_id: "YOUR_USER_ID"
+lmstudio:
+  url: "http://localhost:8080"
+  api_key: "YOUR_LMSTUDIO_KEY"
+dry_run: true
+log_dir: "./logs"

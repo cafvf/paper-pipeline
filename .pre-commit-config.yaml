@@ -1,0 +1,23 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  - repo: local
+    hooks:
+      - id: detect-secrets
+        name: detect-secrets
+        entry: detect-secrets-hook
+        language: python
+        additional_dependencies: ['detect-secrets==1.4.0']
+        pass_filenames: false
+      - id: gitleaks-local
+        name: gitleaks local scan
+        entry: tools/run_gitleaks.bat
+        language: system
+        pass_filenames: false
