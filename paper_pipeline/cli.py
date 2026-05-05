@@ -179,7 +179,7 @@ def _configure_stdout() -> None:
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
-            pass
+            return
 
 
 def _safe_print(text: str) -> None:

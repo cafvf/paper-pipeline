@@ -63,7 +63,8 @@ class LMStudioChatClient:
                 "json_schema": {"name": "paper_assessment", "strict": True, "schema": schema},
             },
         }
-        response = requests.post(self.config.chat_endpoint, json=payload, timeout=budget["timeout_seconds"])
+        # Timeout is stage-configured through LMStudioConfig.
+        response = requests.post(self.config.chat_endpoint, json=payload, timeout=budget["timeout_seconds"])  # nosec B113
         response.raise_for_status()
         data = response.json()
         message = data["choices"][0]["message"]

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 from typing import Any
-from urllib.request import Request, urlopen
+
+import requests
 
 from .config import LMStudioConfig
 
@@ -20,14 +20,13 @@ class LMStudioEmbeddingClient:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         payload = {"model": self.config.embedding_model, "input": texts}
-        request = Request(
+        response = requests.post(
             self.config.embeddings_endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
+            json=payload,
+            timeout=self.config.embedding_timeout_seconds,
         )
-        with urlopen(request, timeout=self.config.embedding_timeout_seconds) as response:  # noqa: S310 - local configurable endpoint
-            parsed = json.loads(response.read().decode("utf-8"))
+        response.raise_for_status()
+        parsed = response.json()
         return [item["embedding"] for item in parsed.get("data", [])]
 
 

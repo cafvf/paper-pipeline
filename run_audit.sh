@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run quick test baseline (ignore Zotero real-access test)
-pytest --ignore=tests/test_zotero_api_real_access_regressions.py --maxfail=1 --durations=20
+uv run ruff check
+uv run pytest -q -o addopts=
+uv run pre-commit run --all-files
+python3 tools/run_gitleaks.py
+uv run bandit -r paper_pipeline
+uvx pip-audit
 
-# Run security scanners (non-fatal)
-pre-commit run --all-files || true
-bash ./tools/run_gitleaks.sh || true
-bandit -r paper_pipeline || true
-safety check || true
-
-echo "Audit completed"
+echo "Audit completed."

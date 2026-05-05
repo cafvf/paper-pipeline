@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import tempfile
 from pathlib import Path
 from typing import Protocol
@@ -162,7 +162,8 @@ class MarkerJsonConverter:
             if self.disable_ocr:
                 command.append("--disable_ocr")
             try:
-                completed = subprocess.run(command, capture_output=True, check=True, text=True, timeout=self.timeout_seconds)
+                # Command is built from trusted converter names and a copied temp PDF, without shell.
+                completed = subprocess.run(command, capture_output=True, check=True, text=True, timeout=self.timeout_seconds)  # nosec B603
             except FileNotFoundError as exc:
                 raise RuntimeError("marker is not installed; install the pdf-robust extra or configure marker_single") from exc
             except subprocess.TimeoutExpired as exc:
@@ -218,7 +219,8 @@ class NougatMarkdownConverter:
             env = os.environ.copy()
             env.setdefault("NO_ALBUMENTATIONS_UPDATE", "1")
             try:
-                subprocess.run(
+                # Command is built from trusted converter names and passed without shell.
+                subprocess.run(  # nosec B603
                     command,
                     capture_output=True,
                     check=True,
