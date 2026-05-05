@@ -1,0 +1,10 @@
+vault_root: "D:\\ChrisVault4.0"
+papers_dir: "D:\\ChrisVault4.0\\x\\LLM\\papers"
+zotero:
+  api_key: "YOUR_ZOTERO_API_KEY"
+  user_id: "YOUR_USER_ID"
+lmstudio:
+  url: "http://localhost:8080"
+  api_key: "YOUR_LMSTUDIO_KEY"
+dry_run: true
+log_dir: "./logs"
