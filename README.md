@@ -43,13 +43,6 @@ Obsidian fica configurado separadamente como fonte/destino de notas.
    uv run paper-pipeline run --config config.yaml --dry-run
    ```
 
-## Migracao Do Layout Antigo
-
-Este repositorio nao espera mais existir dentro de `x/LLM`. Referencias antigas
-a `x/LLM/pipeline_config.example.yaml`, `x/LLM/papers` ou execucao com
-`cwd="x/LLM"` devem apontar para a raiz do repositorio e para
-`config.example.yaml`.
-
 ## Licenca
 
 MIT
