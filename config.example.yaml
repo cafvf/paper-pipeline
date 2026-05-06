@@ -1,15 +1,11 @@
-# Obsidian vault used for inbox notes, literature notes, templates, and lexical context.
-# Use "." only when you intentionally want those notes inside this repository.
-vault_root: "."
-
 # Runtime artifacts live in this standalone repository by default.
+# Obsidian vault/inbox paths are configured through .env:
+# VAULT_ROOT must be absolute, and OBSIDIAN_HUMAN_REVIEW_INBOX_DIR may be
+# absolute or relative to VAULT_ROOT.
 paths:
   llm_root: "."
   papers_root: "papers"
   index_root: "index"
-  # inbox_dir and templates_dir are resolved relative to vault_root unless absolute.
-  inbox_dir: "+"
-  templates_dir: "templates"
 
 lmstudio:
   chat_endpoint: "http://127.0.0.1:1234/v1/chat/completions"

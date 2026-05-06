@@ -57,6 +57,30 @@ ProjectProfile + PaperProfile
 
 The target unit of work is the pair `project_id + citekey`.
 
+## Independence Principle
+
+The target system is not a monolithic pipeline. Each smaller project must be able to run by itself, accept explicit inputs, produce explicit outputs, and be tested independently.
+
+The orchestrator is a sequencing layer only. It must not contain matching rules, prompt logic, Zotero mutation logic, Obsidian note-generation rules, or PDF extraction logic. Those responsibilities stay in the individual projects.
+
+See `docs/workflow_spec.md` for the command and artifact contract.
+
+## Artifact Boundaries
+
+Global artifacts that summarize many projects or many papers should stay as named files under `data/`.
+
+Per-paper products should stay under `papers/{citekey}/` because they naturally grow over time and belong to one paper.
+
+SQLite state should stay under `data/registry/`.
+
+Recommended rule:
+
+```text
+data/*.jsonl or data/*.md      -> global workflow artifacts
+papers/{citekey}/*.json        -> per-paper products
+data/registry/registry.sqlite  -> cache, hashes, run history
+```
+
 ## Module Boundaries
 
 Read-only modules:
@@ -75,11 +99,12 @@ Stateful local modules:
 Approval-gated write modules:
 
 - Zotero sync: applies additive tags only after human approval;
-- Obsidian note generation: creates or patches permanent notes only after human approval.
+- Obsidian note generation: creates or patches permanent notes only after human approval, only for papers in `.To Revise` or `.ToDig`, and only after PDF-backed metadata plus layer 1/2/3 products exist.
 
 Deep-analysis modules:
 
-- PDF analysis: reads full PDFs only after relevance is approved;
+- PDF product extraction: extracts bounded layer 1/2/3 products from PDFs;
+- deep paper analysis: interprets extracted products after relevance is approved;
 - study planner and audit: consume approved classifications and analyses.
 
 ## LLM Boundary
@@ -95,6 +120,8 @@ The output must be a single JSON object validated before storage or rendering.
 
 Current evidence: `paper_pipeline/llm_schema.py` already renders JSON Schema and validates LLM assessment output, but the schema is for reading-stage assessment rather than project-paper utility.
 
+The local LLM should receive bounded text or structured products, not raw PDFs. Raw PDF/full-page fallback should require explicit authorization. The initial project-paper classifier uses metadata only; later reclassification may use overview, section, or technical products extracted by a separate module.
+
 ## Embeddings Boundary
 
 Embeddings should reduce candidate space before classification. Current evidence: `paper_pipeline/embeddings.py` has an LM Studio embeddings client and degraded/lexical fallback status, while `paper_pipeline/selection.py` currently scores using lexical overlap and heuristics.
@@ -103,6 +130,8 @@ For the project-paper roadmap, embeddings should compare:
 
 - project text: title + objectives + methods + gaps;
 - paper text: title + abstract + tags + collections.
+
+Project state should come from the existing `Efforts` layout rather than example tags. `projects.jsonl` should store extracted fields and `content_hash`, not full note bodies.
 
 ## SQLite And Cache Boundary
 
@@ -123,4 +152,3 @@ Hashes should prevent reprocessing unchanged pairs.
 Zotero API credentials are read from environment variables in `paper_pipeline/zotero_api.py`; no `.env` values were inspected for this audit. `run --dry-run` falls back to a no-op source if credentials are missing. `zotero-dry-run` currently calls `ZoteroApiAdapter.from_env()` and lists candidates, so it is not a fully offline command.
 
 No real Zotero API call or real Obsidian vault write was performed during this documentation pass.
-

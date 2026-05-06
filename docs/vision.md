@@ -25,7 +25,7 @@ Obsidian contains the user's evolving research context:
 - existing notes and links;
 - human curation decisions.
 
-The system should initially read this layer only. It should identify project profiles from explicit markers such as `#projeto` or frontmatter like `type: project` and `status: active`.
+The system should initially read this layer only. It should identify project profiles from the existing `Efforts` structure and extract only fields useful to the code plus a content hash.
 
 ## Why Zotero Is Evidence
 
@@ -68,4 +68,3 @@ The first project-specific MVP should be "triage without writing":
 - classify top 10 papers per project using title, abstract, tags, and collections;
 - export a Markdown review report;
 - avoid Zotero writes, permanent Obsidian notes, and full PDF analysis.
-

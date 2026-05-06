@@ -9,16 +9,37 @@ Current vault integration is split across:
 - `paper_pipeline/decision_applier.py`: parses human decisions and can delete resolved inbox notes;
 - `paper_pipeline/knowledge_application.py` and `paper_pipeline/note_patcher.py`: can create or patch local knowledge drafts after approval.
 
-The repository is configured so `vault_root` can point outside the repo, while runtime artifacts default to repository-local `papers/` and `index/`.
+The target configuration uses `.env`/environment variables for Obsidian paths, while runtime artifacts default to repository-local `papers/` and `index/`.
 
 No real Obsidian vault write was made during this documentation pass.
 
+## Path Configuration
+
+Human-decision files for Obsidian should be written only to a configured Obsidian inbox path. These paths should come from `.env` or environment variables, never hardcoded local paths.
+
+Suggested environment variables:
+
+- `VAULT_ROOT`: absolute Obsidian vault root;
+- `OBSIDIAN_HUMAN_REVIEW_INBOX_DIR`: single inbox for all human-decision reports, including paper promotion, reference matching/acquisition, equation verification, and generated notes awaiting manual filing.
+
+`VAULT_ROOT` should be absolute. Other Obsidian paths may be absolute or relative to `VAULT_ROOT`.
+
+All human-decision Markdown surfaces should use the single configured inbox, including project-paper review reports, reference match/acquisition review tables, per-paper equation review files, and generated notes awaiting manual filing. The user moves accepted notes to their final Obsidian folders manually.
+
+Equation-review Markdown files and their copied evidence images should be placed directly in the inbox, without creating a per-paper subfolder.
+
+Generated plans may resolve these paths, but documentation and logs should avoid exposing private absolute paths unless explicitly requested for local debugging.
+
 ## Project Identification
 
-MVP project inventory should read only explicit project notes:
+MVP project inventory should map project state from the existing `Efforts` structure:
 
-- notes tagged with `#projeto`; or
-- frontmatter containing `type: project` and `status: active`.
+- `Efforts/On` -> `on`;
+- `Efforts/Ongoing` -> `ongoing`;
+- `Efforts/Simmering` -> `simmering`;
+- `Efforts/Terminated` -> `terminated`.
+
+Tags and frontmatter may supplement extraction, but they are not the source of truth for project state.
 
 Recommended fields:
 
@@ -33,42 +54,29 @@ Recommended fields:
 - source path;
 - content hash.
 
-Inactive, archived, and unrelated notes should be ignored by default.
+Terminated and unrelated notes should be ignored by default by downstream matching/classification, while the inventory may still record terminated projects for context.
 
 ## Review Reports
 
 Review reports are temporary human-review surfaces, not permanent literature notes.
 
-Suggested frontmatter:
+Review reports do not require frontmatter. Use stable filenames instead:
 
-```yaml
----
-type: research-review
-review_kind: project_paper_triage
-status: pending
-created: 2026-05-06
----
+```text
+review-project-papers-YYYY-MM-DD.md
+review-reference-matches-YYYY-MM-DD.md
+review-equations-{citekey}-YYYY-MM-DD.md
 ```
 
-Reports may be written to a configured inbox/output directory. They should be grouped by project and utility class.
+Reports may be written to a configured inbox/output directory. For the project-paper workflow, each review item should aggregate by paper while showing all useful project-paper matches for that paper. This avoids forcing a single primary project.
 
 ## Permanent Notes
 
-Permanent paper notes should only be created after human approval.
+Paper-note drafts should only be generated after human approval and only when the paper is in `.To Revise` or `.ToDig`, has an available PDF, and has metadata plus layer 1/2/3 extracted products available. A metadata-only Zotero item may appear in review and matching reports, but it should not receive a paper-note draft until the PDF and all required extracted products exist.
 
-Expected format:
+Papers already in `.To Revise` or `.ToDig` may need notes even before the new project-paper workflow created them. The note-generation project should therefore be able to plan drafts for existing `.To Revise` and `.ToDig` items after human review, not only for newly promoted papers, but still only when the PDF and required layer 1/2/3 products are available. The note should be generated from those extracted products and placed in the single Obsidian inbox for manual filing.
 
-```yaml
----
-type: paper-note
-citekey: robertson1990soilclassification
-utility:
-  - essential
-projects:
-  - CPTu Bayesian Soil Classification
-status: reviewed
----
-```
+Paper-note drafts do not require frontmatter. They should use clear headings and sections, because the user will move and adapt them manually.
 
 ```markdown
 # Robertson 1990 - Soil classification using CPT
@@ -110,5 +118,4 @@ Internal links should be preserved as Obsidian wikilinks. Automated patches shou
 - Do not create notes for `irrelevant_now` papers.
 - Prefer grouped review reports before permanent notes.
 - Require approval for project links and paper notes.
-- Keep generated drafts in an inbox/draft area until reviewed.
-
+- Keep generated drafts in the single Obsidian inbox until manually filed.

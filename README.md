@@ -36,10 +36,12 @@ Obsidian.
    cp config.example.yaml config.yaml
    ```
 
-3. Edite `config.yaml`.
+3. Edite `config.yaml` e `.env`.
 
-   Defina `vault_root` para o caminho do seu cofre Obsidian quando quiser que
-   inbox, notas de literatura e contexto lexical sejam lidos/escritos no cofre.
+   Defina `VAULT_ROOT` no `.env` para o caminho absoluto do seu cofre Obsidian.
+   Arquivos de decisao humana devem ir para uma inbox unica do Obsidian definida
+   em `.env` ou variaveis de ambiente. `VAULT_ROOT` deve ser absoluto; os demais
+   caminhos podem ser relativos a ele.
    Os caminhos em `paths.llm_root`, `paths.papers_root` e `paths.index_root`
    ficam relativos ao arquivo de configuracao e, por padrao, apontam para este
    repositorio.
@@ -69,6 +71,10 @@ Obsidian.
   notas permanentes.
 - `docs/human_review_workflow.md`: fluxo recomendacao -> revisao -> aprovacao.
 - `docs/development_plan.md`: ciclos pequenos de implementacao e validacao.
+- `docs/workflow_spec.md`: comandos independentes, artefatos, reviews por
+  rodada, camadas de entrada da LLM e politica de execucao noturna.
+- `docs/reading_protocol_criteria.md`: criterios operacionais derivados do
+  protocolo de leitura local do usuario para recomendacao de estagios Zotero.
 
 ## Seguranca Operacional
 
