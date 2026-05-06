@@ -1,4 +1,5 @@
 Migration notes
+===============
 
 Steps to migrate code from a vault's `x/LLM` folder into this repository. Replace `<VAULT_ROOT>` and `<DEST>` with your paths.
 
@@ -22,16 +23,11 @@ Linux / macOS (bash):
 
 	python tools/refactor_imports.py "<DEST>"
 
-3) Create virtual env, install and test:
+3) Install and test with uv:
 
-	python -m venv uv
-	# Windows
-	.\\uv\\Scripts\\Activate.ps1
-	# Linux / macOS
-	source uv/bin/activate
-	pip install -r requirements.txt
-	pytest -q
-	python cli.py --dry-run
+	uv sync --locked
+	uv run pytest -q -o addopts=
+	uv run paper-pipeline run --vault-root . --dry-run
 
 4) Git init & push:
 
@@ -40,3 +36,7 @@ Linux / macOS (bash):
 	git commit -m "Initial scaffold: paper-pipeline (extracted from vault)"
 	# create remote manually or with GitHub CLI (optional):
 	# gh repo create <owner>/<repo> --public --source=. --remote=origin --push
+
+After migration, see `README.md` and `docs/architecture.md` for the current
+standalone layout and `docs/roadmap.md` for the Obsidian + Zotero modular
+roadmap.

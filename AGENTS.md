@@ -20,6 +20,10 @@ Use this file for persistent Codex/agent instructions. Human-facing setup and us
 ## Canonical References
 
 - `README.md`: onboarding and standalone-vs-vault layout.
+- `docs/architecture.md`: current architecture, target module boundaries, and write/read-only surfaces.
+- `docs/roadmap.md`: Obsidian + Zotero modular roadmap and current repository adherence.
+- `docs/data_contracts.md`: target project-paper contracts and examples.
+- `docs/zotero_policy.md` and `docs/obsidian_policy.md`: external-system safety policy.
 - `config.example.yaml`: safe configuration template.
 - `.pre-commit-config.yaml`: local hook contract.
 - `.gitleaks.toml`: secret-scanning contract.
