@@ -27,3 +27,6 @@ dependencies = [
 
 [project.scripts]
 paper-pipeline = "paper_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["paper_pipeline*"]
