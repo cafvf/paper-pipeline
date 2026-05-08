@@ -5,7 +5,7 @@ import sys
 
 from .analysis_engine import LocalPaperAnalyzer
 from .citekey_resolver import resolve_citekey_from_vault
-from .config import default_config, load_config
+from .config import load_config
 from .contracts import Stage
 from .lmstudio_chat import LMStudioChatClient
 from .runner import run_once
@@ -19,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="paper-pipeline")
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run")
-    run.add_argument("--vault-root", default=".")
+    run.add_argument("--vault-root", default=None)
     run.add_argument("--config", default=None)
     run.add_argument("--max-total", type=int, default=10)
     run.add_argument("--dry-run", action="store_true")
@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     zotero = sub.add_parser("zotero-dry-run")
     zotero.add_argument("--max-total", type=int, default=10)
     pilot = sub.add_parser("pilot-run")
-    pilot.add_argument("--vault-root", default="./.")
+    pilot.add_argument("--vault-root", default=None)
     pilot.add_argument("--config", default=None)
     pilot.add_argument("--max-total", type=int, default=1)
     pilot.add_argument("--packet-max-chars", type=int, default=20000)
@@ -112,7 +112,7 @@ class _CitekeyFilteredSource:
 
 
 def _run_cycle(args) -> int:
-    config = load_config(args.config, vault_root=args.vault_root) if args.config else default_config(args.vault_root)
+    config = _load_cli_config(args.config, args.vault_root)
     if args.lm_timeout_seconds is not None:
         config = _with_lm_timeout(config, args.lm_timeout_seconds)
     if args.max_output_tokens is not None:
@@ -163,6 +163,12 @@ def _run_cycle(args) -> int:
     for note in result.notes_written:
         _safe_print(f"NOTE {note}")
     return 0
+
+
+def _load_cli_config(config_path: str | None, vault_root: str | None):
+    if vault_root is None:
+        return load_config(config_path)
+    return load_config(config_path, vault_root=vault_root)
 
 
 def _stage_from_cli(value: str | None):

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paper-pipeline.local/schemas/paper_profile.schema.json",
+  "title": "PaperProfile",
+  "type": "object",
+  "required": [
+    "citekey",
+    "zotero_key",
+    "title",
+    "authors",
+    "collections",
+    "tags",
+    "has_pdf",
+    "pdf_paths",
+    "paper_hash",
+    "metadata_snapshot_path"
+  ],
+  "properties": {
+    "citekey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "zotero_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "year": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "authors": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "abstract": {
+      "type": "string"
+    },
+    "collections": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "doi": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "has_pdf": {
+      "type": "boolean"
+    },
+    "pdf_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "paper_hash": {
+      "type": "string",
+      "pattern": "^sha256:[A-Za-z0-9_-]+$"
+    },
+    "metadata_snapshot_path": {
+      "type": "string",
+      "pattern": "^papers/[A-Za-z0-9_-]+/metadata_snapshot\\.json$"
+    }
+  },
+  "additionalProperties": false
+}

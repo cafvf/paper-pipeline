@@ -1,0 +1,47 @@
+{
+  "project_id": "cptu_bayesian_classification",
+  "citekey": "robertson1990soilclassification",
+  "utility_class": "essential",
+  "scores": {
+    "topic_fit": 5,
+    "method_fit": 5,
+    "formulation_value": 4,
+    "implementation_value": 3,
+    "empirical_value": 3,
+    "gap_value": 5,
+    "reading_effort": 3
+  },
+  "recommended_action": "read_now",
+  "reason": "The paper defines the deterministic CPT classification framework that the project intends to extend probabilistically.",
+  "possible_uses": [
+    "literature review",
+    "baseline method",
+    "problem formulation"
+  ],
+  "limitations": [
+    "Classification is empirical and deterministic",
+    "Uncertainty treatment is limited"
+  ],
+  "confidence": "high",
+  "requires_human_review": true,
+  "current_zotero_stage": ".ToLook",
+  "recommended_zotero_stage": ".To Revise",
+  "stage_recommendation_reason": "Approved project utility and Gate 2 score support deeper review.",
+  "stage_gate_results": {
+    "gate_1_triggers": [
+      "active_keyword_in_title"
+    ],
+    "gate_2_score": 4,
+    "gate_2_total": 6,
+    "gate_2_passed": true,
+    "gate_3_passed": false
+  },
+  "reading_protocol_evidence": [
+    "matches To Revise methodological-review gate"
+  ],
+  "prompt_hash": "sha256:promptfixture",
+  "input_layer": "metadata",
+  "input_products": [
+    "papers/robertson1990soilclassification/metadata_snapshot.json"
+  ]
+}

@@ -1,0 +1,35 @@
+utility_classes:
+  - essential
+  - methodological
+  - formulational
+  - case_study
+  - review
+  - counterpoint
+  - implementable
+  - peripheral
+  - irrelevant_now
+
+actions:
+  - read_now
+  - read_later
+  - extract_equations
+  - reproduce_code
+  - summarize_only
+  - link_to_project
+  - ignore_for_now
+
+confidence_levels:
+  - low
+  - medium
+  - high
+
+input_layers:
+  - metadata
+  - overview
+  - sections
+  - technical
+  - pdf_fallback
+
+todig_recommendation:
+  min_project_paper_adherence: 0.8
+  allow_protocol_gate_override: true

@@ -1,4 +1,4 @@
-from paper_pipeline.cli import _with_lm_timeout, _with_max_output_tokens, build_parser
+from paper_pipeline.cli import _with_lm_timeout, _with_max_output_tokens, build_parser, main
 from paper_pipeline.config import default_config
 
 
@@ -87,3 +87,22 @@ def test_cli_lm_overrides_apply_to_stage_specific_budgets(tmp_path):
     assert cfg.lmstudio.max_output_tokens == 2048
     assert cfg.lmstudio.tolook_max_output_tokens == 2048
     assert cfg.lmstudio.deep_stage_max_output_tokens == 2048
+
+
+def test_cli_run_loads_dotenv_without_vault_root_argument(tmp_path, monkeypatch, capsys):
+    vault = tmp_path / "vault"
+    inbox = vault / "Inbox" / "Human Review"
+    inbox.mkdir(parents=True)
+    (tmp_path / ".env").write_text(
+        f"VAULT_ROOT={vault}\nOBSIDIAN_HUMAN_REVIEW_INBOX_DIR=Inbox/Human Review\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("VAULT_ROOT", raising=False)
+    monkeypatch.delenv("OBSIDIAN_HUMAN_REVIEW_INBOX_DIR", raising=False)
+    monkeypatch.delenv("ZOTERO_API_KEY", raising=False)
+    monkeypatch.delenv("ZOTERO_USER_ID", raising=False)
+
+    assert main(["run", "--dry-run", "--max-total", "1"]) == 0
+
+    assert "dry-run" in capsys.readouterr().out

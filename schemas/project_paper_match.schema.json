@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paper-pipeline.local/schemas/project_paper_match.schema.json",
+  "title": "ProjectPaperMatch",
+  "type": "object",
+  "required": [
+    "project_id",
+    "citekey",
+    "candidate_score",
+    "rank",
+    "evidence",
+    "method",
+    "created_at"
+  ],
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+    },
+    "citekey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "candidate_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "rank": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 360
+      }
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "lexical_v1",
+        "embedding_v1",
+        "manual_fixture"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

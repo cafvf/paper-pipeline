@@ -1,0 +1,14 @@
+project_paper_classification:
+  version: project-paper-classification-v1
+  input_policy:
+    default_input_layer: metadata
+    allow_pdf_fallback: false
+    require_bounded_products: true
+  system: >
+    Classify how a paper helps a specific research project. Use only the
+    provided project profile, paper profile, candidate evidence, taxonomy, and
+    available product summaries.
+  user_contract: >
+    Return exactly one JSON object matching schemas/llm_classification.schema.json.
+    Do not include prose, markdown, citations outside provided evidence, or
+    unsupported utility/action values.

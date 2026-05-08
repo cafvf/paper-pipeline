@@ -1,0 +1,26 @@
+{
+  "project_id": "cptu_bayesian_classification",
+  "title": "CPTu Bayesian Soil Classification",
+  "source_path": "Efforts/On/CPTu Bayesian Soil Classification.md",
+  "objectives": [
+    "Develop a hybrid probabilistic model for CPTu soil classification"
+  ],
+  "methods": [
+    "CPTu",
+    "Robertson chart",
+    "Bayesian changepoint"
+  ],
+  "knowledge_gaps": [
+    "distance to nonlinear chart regions"
+  ],
+  "expected_outputs": [
+    "paper",
+    "python implementation"
+  ],
+  "priority": "high",
+  "project_state": "on",
+  "state_source": "Efforts/On",
+  "tags": [],
+  "links": [],
+  "content_hash": "sha256:projectfixture"
+}

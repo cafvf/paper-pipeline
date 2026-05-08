@@ -1,0 +1,18 @@
+project_states_matched_by_default:
+  - on
+  - ongoing
+
+project_states_available_for_context:
+  - simmering
+  - terminated
+
+keyword_sources:
+  - project_objectives
+  - project_methods
+  - project_knowledge_gaps
+  - paper_title
+  - paper_abstract
+  - paper_tags
+  - monitored_keywords
+
+monitored_keywords: []

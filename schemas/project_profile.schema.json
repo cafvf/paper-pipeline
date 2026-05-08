@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paper-pipeline.local/schemas/project_profile.schema.json",
+  "title": "ProjectProfile",
+  "type": "object",
+  "required": [
+    "project_id",
+    "title",
+    "source_path",
+    "objectives",
+    "methods",
+    "knowledge_gaps",
+    "expected_outputs",
+    "priority",
+    "project_state",
+    "state_source",
+    "tags",
+    "content_hash"
+  ],
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "objectives": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "methods": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "knowledge_gaps": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "expected_outputs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "project_state": {
+      "type": "string",
+      "enum": [
+        "on",
+        "ongoing",
+        "simmering",
+        "terminated"
+      ]
+    },
+    "state_source": {
+      "type": "string",
+      "enum": [
+        "Efforts/On",
+        "Efforts/Ongoing",
+        "Efforts/Simmering",
+        "Efforts/Terminated"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "content_hash": {
+      "type": "string",
+      "pattern": "^sha256:[A-Za-z0-9_-]+$"
+    }
+  },
+  "additionalProperties": false
+}

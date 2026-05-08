@@ -1,0 +1,23 @@
+{
+  "citekey": "robertson1990soilclassification",
+  "zotero_key": "ABC123",
+  "title": "Soil classification using the cone penetration test",
+  "year": 1990,
+  "authors": [
+    "Robertson"
+  ],
+  "abstract": "Abstract text when available.",
+  "collections": [
+    ".ToLook",
+    "CPTu"
+  ],
+  "tags": [
+    "cpt",
+    "classification"
+  ],
+  "doi": "10.0000/example",
+  "has_pdf": true,
+  "pdf_paths": [],
+  "paper_hash": "sha256:paperfixture",
+  "metadata_snapshot_path": "papers/robertson1990soilclassification/metadata_snapshot.json"
+}

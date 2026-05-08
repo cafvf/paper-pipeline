@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paper-pipeline.local/schemas/llm_classification.schema.json",
+  "title": "LLMClassification",
+  "type": "object",
+  "required": [
+    "project_id",
+    "citekey",
+    "utility_class",
+    "scores",
+    "recommended_action",
+    "reason",
+    "possible_uses",
+    "limitations",
+    "confidence",
+    "requires_human_review",
+    "current_zotero_stage",
+    "recommended_zotero_stage",
+    "stage_recommendation_reason",
+    "stage_gate_results",
+    "reading_protocol_evidence",
+    "prompt_hash",
+    "input_layer",
+    "input_products"
+  ],
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+    },
+    "citekey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "utility_class": {
+      "type": "string",
+      "enum": [
+        "essential",
+        "methodological",
+        "formulational",
+        "case_study",
+        "review",
+        "counterpoint",
+        "implementable",
+        "peripheral",
+        "irrelevant_now"
+      ]
+    },
+    "scores": {
+      "type": "object",
+      "required": [
+        "topic_fit",
+        "method_fit",
+        "formulation_value",
+        "implementation_value",
+        "empirical_value",
+        "gap_value",
+        "reading_effort"
+      ],
+      "properties": {
+        "topic_fit": {
+          "$ref": "#/$defs/five_point_score"
+        },
+        "method_fit": {
+          "$ref": "#/$defs/five_point_score"
+        },
+        "formulation_value": {
+          "$ref": "#/$defs/five_point_score"
+        },
+        "implementation_value": {
+          "$ref": "#/$defs/five_point_score"
+        },
+        "empirical_value": {
+          "$ref": "#/$defs/five_point_score"
+        },
+        "gap_value": {
+          "$ref": "#/$defs/five_point_score"
+        },
+        "reading_effort": {
+          "$ref": "#/$defs/five_point_score"
+        }
+      },
+      "additionalProperties": false
+    },
+    "recommended_action": {
+      "type": "string",
+      "enum": [
+        "read_now",
+        "read_later",
+        "extract_equations",
+        "reproduce_code",
+        "summarize_only",
+        "link_to_project",
+        "ignore_for_now"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 700
+    },
+    "possible_uses": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 160
+      },
+      "maxItems": 8
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 240
+      },
+      "maxItems": 8
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "requires_human_review": {
+      "const": true
+    },
+    "current_zotero_stage": {
+      "$ref": "#/$defs/zotero_stage"
+    },
+    "recommended_zotero_stage": {
+      "$ref": "#/$defs/zotero_stage"
+    },
+    "stage_recommendation_reason": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 500
+    },
+    "stage_gate_results": {
+      "type": "object",
+      "required": [
+        "gate_1_triggers",
+        "gate_2_score",
+        "gate_2_total",
+        "gate_2_passed",
+        "gate_3_passed"
+      ],
+      "properties": {
+        "gate_1_triggers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "gate_2_score": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "gate_2_total": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "gate_2_passed": {
+          "type": "boolean"
+        },
+        "gate_3_passed": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "reading_protocol_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 240
+      },
+      "maxItems": 8
+    },
+    "prompt_hash": {
+      "type": "string",
+      "pattern": "^sha256:[A-Za-z0-9_-]+$"
+    },
+    "input_layer": {
+      "type": "string",
+      "enum": [
+        "metadata",
+        "overview",
+        "sections",
+        "technical",
+        "pdf_fallback"
+      ]
+    },
+    "input_products": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "pdf_fallback_authorized": {
+      "type": "boolean"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "input_layer": {
+            "const": "pdf_fallback"
+          }
+        },
+        "required": [
+          "input_layer"
+        ]
+      },
+      "then": {
+        "required": [
+          "pdf_fallback_authorized"
+        ],
+        "properties": {
+          "pdf_fallback_authorized": {
+            "const": true
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "five_point_score": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5
+    },
+    "zotero_stage": {
+      "type": "string",
+      "enum": [
+        ".ToLook",
+        ".To Revise",
+        ".ToDig",
+        "Expendable"
+      ]
+    }
+  }
+}

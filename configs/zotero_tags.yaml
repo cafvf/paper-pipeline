@@ -1,0 +1,30 @@
+stages:
+  tolook:
+    collection: ".ToLook"
+    stage_tag: "@look"
+  torevise:
+    collection: ".To Revise"
+    stage_tag: "@review"
+  todig:
+    collection: ".ToDig"
+    stage_tag: "@dig"
+  expendable:
+    collection: "Expendable"
+    stage_tag: "!discarded"
+
+mutually_exclusive_stage_collections:
+  - ".ToLook"
+  - ".To Revise"
+  - ".ToDig"
+  - "Expendable"
+
+mutually_exclusive_stage_tags:
+  - "@look"
+  - "@review"
+  - "@dig"
+
+preserve_collection_kinds:
+  - topic
+  - project
+  - paper
+  - thematic
