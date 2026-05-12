@@ -259,7 +259,9 @@ Thumbs.db
 logs/
 *.log
 # Data / large files
+data/
 papers/
+index/
 *.pdf
 *.sqlite
 # pipenv

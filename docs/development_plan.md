@@ -4,6 +4,19 @@ This plan keeps the next cycles small and reversible. It assumes no real Zotero 
 
 Each project below must be implemented and tested independently. Integration and sequencing belong to the orchestrator project, which should come after the smaller projects have stable command contracts and output artifacts.
 
+## Engineering Guardrails
+
+All cycles in this plan follow Test-Driven Development, Extreme Programming,
+Clean Code, and Spec-Driven Development together.
+
+- start from the governing spec, contract, schema, or roadmap item;
+- add or update automated tests before treating behavior work as complete;
+- implement the smallest change that satisfies the test and refactor with tests
+  green;
+- do not treat implementation without tests as a finished delivery.
+
+See `docs/development_guidelines.md` for the repository-wide rule set.
+
 ## Cycle 1: Contracts And Fixtures
 
 Tasks:

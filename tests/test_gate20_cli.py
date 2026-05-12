@@ -44,6 +44,39 @@ def test_cli_parser_supports_zotero_dry_run():
     assert args.max_total == 2
 
 
+def test_cli_parser_supports_scan_obsidian():
+    args = build_parser().parse_args(
+        [
+            "scan-obsidian",
+            "--vault-root",
+            "/vault",
+            "--output",
+            "data/projects.jsonl",
+        ]
+    )
+    assert args.command == "scan-obsidian"
+    assert args.vault_root == "/vault"
+    assert args.output == "data/projects.jsonl"
+
+
+def test_cli_parser_supports_scan_zotero_offline_fixture():
+    args = build_parser().parse_args(
+        [
+            "scan-zotero",
+            "--offline-fixture",
+            "fixtures/zotero.json",
+            "--output",
+            "data/papers.jsonl",
+            "--papers-root",
+            "papers",
+        ]
+    )
+    assert args.command == "scan-zotero"
+    assert args.offline_fixture == "fixtures/zotero.json"
+    assert args.output == "data/papers.jsonl"
+    assert args.papers_root == "papers"
+
+
 def test_cli_parser_supports_pilot_run():
     args = build_parser().parse_args(
         [

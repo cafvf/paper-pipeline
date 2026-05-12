@@ -6,13 +6,17 @@ import sys
 from .analysis_engine import LocalPaperAnalyzer
 from .citekey_resolver import resolve_citekey_from_vault
 from .config import load_config
-from .contracts import Stage
+from .contracts import PipelineError, Stage
 from .lmstudio_chat import LMStudioChatClient
+from .obsidian_inventory import main as obsidian_inventory_main
+from .project_paper_matching import run_match_from_jsonl
+from .registry import sync_registry_from_jsonl
 from .runner import run_once
 from .selection import select_batch
 from .vault_index import build_lexical_index
 from .zotero_api import ZoteroApiAdapter, ZoteroApiError
 from .zotero_collections import resolve_operational_collections
+from .zotero_inventory import main as zotero_inventory_main
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +36,24 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--citekey", default=None)
     zotero = sub.add_parser("zotero-dry-run")
     zotero.add_argument("--max-total", type=int, default=10)
+    scan_obsidian = sub.add_parser("scan-obsidian")
+    scan_obsidian.add_argument("--vault-root", required=True)
+    scan_obsidian.add_argument("--output", default="data/projects.jsonl")
+    scan_zotero = sub.add_parser("scan-zotero")
+    scan_zotero.add_argument("--offline-fixture", default=None)
+    scan_zotero.add_argument("--output", default="data/papers.jsonl")
+    scan_zotero.add_argument("--papers-root", default="papers")
+    sync_registry = sub.add_parser("sync-registry")
+    sync_registry.add_argument("--db", default="data/registry/registry.sqlite")
+    sync_registry.add_argument("--projects", default="data/projects.jsonl")
+    sync_registry.add_argument("--papers", default="data/papers.jsonl")
+    match = sub.add_parser("match")
+    match.add_argument("--projects", default="data/projects.jsonl")
+    match.add_argument("--papers", default="data/papers.jsonl")
+    match.add_argument("--output", default="data/candidates.jsonl")
+    match.add_argument("--top-n", type=int, default=20)
+    match.add_argument("--include-states", default="on,ongoing")
+    match.add_argument("--registry-db", default=None)
     pilot = sub.add_parser("pilot-run")
     pilot.add_argument("--vault-root", default=None)
     pilot.add_argument("--config", default=None)
@@ -62,6 +84,49 @@ def main(argv: list[str] | None = None) -> int:
         for entry in batch["blocked_missing_pdf"]:
             candidate = entry["candidate"]
             _safe_print(f"BLOCKED_MISSING_PDF {candidate.stage.value} {candidate.citekey} title={candidate.title}")
+        return 0
+    if args.command == "scan-obsidian":
+        return obsidian_inventory_main(["--vault-root", args.vault_root, "--output", args.output])
+    if args.command == "scan-zotero":
+        inventory_args = ["--output", args.output, "--papers-root", args.papers_root]
+        if args.offline_fixture:
+            inventory_args.extend(["--offline-fixture", args.offline_fixture])
+        return zotero_inventory_main(inventory_args)
+    if args.command == "sync-registry":
+        try:
+            report = sync_registry_from_jsonl(args.db, projects_path=args.projects, papers_path=args.papers)
+        except PipelineError as exc:
+            print(f"sync-registry error: {exc}", file=sys.stderr)
+            return 2
+        _safe_print(
+            "projects "
+            f"inserted={report.projects.inserted} updated={report.projects.updated} unchanged={report.projects.unchanged}"
+        )
+        _safe_print(
+            "papers "
+            f"inserted={report.papers.inserted} updated={report.papers.updated} unchanged={report.papers.unchanged}"
+        )
+        for warning in report.warnings:
+            _safe_print(f"WARNING {warning}")
+        return 0
+    if args.command == "match":
+        try:
+            candidates, report = run_match_from_jsonl(
+                projects_path=args.projects,
+                papers_path=args.papers,
+                output_path=args.output,
+                include_states=_split_csv(args.include_states),
+                top_n=args.top_n,
+                registry_db=args.registry_db,
+            )
+        except PipelineError as exc:
+            print(_match_error_message(str(exc)), file=sys.stderr)
+            return 2
+        _safe_print(
+            f"candidates={len(candidates)} skipped_pairs={report.skipped_pairs} output={args.output}"
+        )
+        for warning in report.warnings:
+            _safe_print(f"WARNING {warning}")
         return 0
     if args.command == "pilot-run":
         return _run_cycle(args)
@@ -190,6 +255,21 @@ def _configure_stdout() -> None:
 
 def _safe_print(text: str) -> None:
     print(text)
+
+
+def _split_csv(value: str):
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def _match_error_message(error: str) -> str:
+    if "projects JSONL not found" in error or "papers JSONL not found" in error:
+        return (
+            f"match error: {error}\n"
+            "Generate the missing inventories first:\n"
+            "  uv run paper-pipeline scan-obsidian --vault-root /path/to/vault --output data/projects.jsonl\n"
+            "  uv run paper-pipeline scan-zotero --output data/papers.jsonl --papers-root papers"
+        )
+    return f"match error: {error}"
 
 
 def _with_lm_timeout(config, timeout_seconds: int):

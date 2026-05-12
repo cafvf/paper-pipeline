@@ -10,6 +10,7 @@ import requests
 
 from .contracts import PipelineError, Stage
 from .selection import CandidatePaper
+from .zotero_adapter import ZoteroItem
 from .zotero_plan import ZoteroActionPlan
 
 
@@ -101,6 +102,45 @@ class ZoteroApiAdapter:
                     )
                 )
         return candidates
+
+    def list_paper_items(self) -> list[ZoteroItem]:
+        collections_by_key = {key: name for name, key in self._collections_by_name().items()}
+        items: list[ZoteroItem] = []
+        for item in self._get_all("/items/top"):
+            data = item.get("data", {})
+            if data.get("itemType") in {"attachment", "note"}:
+                continue
+            item_key = str(data.get("key") or item.get("key", ""))
+            citekey = extract_citekey(data) or derive_citekey(data) or item_key
+            children = self._children(item_key, item)
+            pdf_paths = [
+                path
+                for child in children
+                if _is_pdf_attachment(child.get("data", {}))
+                for path in [local_pdf_path(self.data_dir, child.get("key", ""), child.get("data", {}))]
+                if path and Path(path).exists()
+            ]
+            items.append(
+                ZoteroItem(
+                    key=item_key,
+                    citekey=str(citekey),
+                    title=str(data.get("title", "") or "(untitled)"),
+                    abstract=str(data.get("abstractNote", "") or ""),
+                    collections=[
+                        collections_by_key.get(str(key), str(key))
+                        for key in data.get("collections", [])
+                        if str(key)
+                    ],
+                    tags=[str(tag.get("tag", "")) for tag in data.get("tags", []) if tag.get("tag")],
+                    publication_year=publication_year(data.get("date", "")),
+                    pdf_paths=pdf_paths,
+                    doi=str(data.get("DOI", "") or ""),
+                    source_type=str(data.get("itemType", "") or ""),
+                    journal=str(data.get("publicationTitle", "") or data.get("proceedingsTitle", "") or ""),
+                    authors=creator_names(data.get("creators", [])),
+                )
+            )
+        return items
 
     def apply_plan(self, plan: ZoteroActionPlan) -> dict:
         if plan.status == "blocked":

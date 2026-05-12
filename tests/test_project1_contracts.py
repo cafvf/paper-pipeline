@@ -33,6 +33,28 @@ def test_project_profile_rejects_archived_state():
         validate_instance(project, "project_profile.schema.json")
 
 
+def test_project_profile_rejects_uncontracted_full_body_field():
+    project = _fixture("project_profile.valid.json")
+    project["body"] = "Private note body should not be copied into projects.jsonl."
+    with pytest.raises(ValidationError, match="Additional properties are not allowed"):
+        validate_instance(project, "project_profile.schema.json")
+
+
+def test_paper_profile_rejects_metadata_snapshot_outside_papers_tree():
+    paper = _fixture("paper_profile.valid.json")
+    paper["metadata_snapshot_path"] = "/tmp/metadata_snapshot.json"
+    with pytest.raises(ValidationError, match="paper_profile.schema.json validation failed"):
+        validate_instance(paper, "paper_profile.schema.json")
+
+
+def test_project_paper_match_rejects_empty_evidence_and_out_of_range_score():
+    match = _fixture("project_paper_match.valid.json")
+    match["candidate_score"] = 1.2
+    match["evidence"] = []
+    with pytest.raises(ValidationError, match="project_paper_match.schema.json validation failed"):
+        validate_instance(match, "project_paper_match.schema.json")
+
+
 def test_llm_classification_rejects_invalid_utility_class():
     raw = _fixture("llm_classification.valid.json")
     raw["utility_class"] = "interesting"

@@ -63,6 +63,8 @@ Obsidian.
 - `docs/vision.md`: problema, camadas Obsidian/Zotero e limites da LLM.
 - `docs/architecture.md`: arquitetura atual, fluxo alvo e fronteiras de escrita.
 - `docs/roadmap.md`: aderencia aos 13 projetos planejados.
+- `docs/development_guidelines.md`: diretrizes de engenharia, TDD/XP/Clean Code/Spec-Driven e politica obrigatoria de testes.
+- `docs/efforts_authoring.md`: como estruturar notas em `Efforts/` para melhorar a extração de `ProjectProfile`.
 - `docs/modules.md`: responsabilidades, entradas, saidas e efeitos colaterais.
 - `docs/data_contracts.md`: contratos esperados para projeto, artigo, matching,
   classificacao, revisao humana e runs.
@@ -75,6 +77,20 @@ Obsidian.
   rodada, camadas de entrada da LLM e politica de execucao noturna.
 - `docs/reading_protocol_criteria.md`: criterios operacionais derivados do
   protocolo de leitura local do usuario para recomendacao de estagios Zotero.
+
+## Desenvolvimento
+
+O desenvolvimento deste repositorio segue conjuntamente Test-Driven
+Development, Extreme Programming, Clean Code e Spec-Driven Development.
+
+- comportamento novo ou alterado comeca pela spec, contrato, schema ou plano;
+- toda mudanca de comportamento exige testes automatizados no mesmo diff;
+- implementacao sem teste nao conclui a entrega;
+- refatoracao deve manter o design simples, nomes claros, baixo acoplamento e
+  pouca duplicacao.
+
+Consulte `docs/development_guidelines.md` para o fluxo esperado de trabalho e
+os criterios de revisao.
 
 ## Seguranca Operacional
 
