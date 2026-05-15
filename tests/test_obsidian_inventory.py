@@ -501,7 +501,7 @@ priority: A
 - Uma aba de Classificação de Solos baseada em dados de CPTu
 
 ## Bloqueios / Dependências
-- 
+-
 
 ## Definition of Done (auditável)
 - [ ] Aba completa
