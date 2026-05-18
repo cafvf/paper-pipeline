@@ -113,3 +113,41 @@ def test_rate_limit_error_mentions_retry_after():
     adapter = ZoteroApiAdapter(api_key="secret", user_id="123", session=Session())
     with pytest.raises(ZoteroApiError, match="Retry-After: 30"):
         adapter.list_candidates()
+
+
+def test_zotero_api_config_loads_credentials_from_dotenv(tmp_path: Path, monkeypatch):
+    from paper_pipeline.zotero_api import ZoteroApiConfig
+
+    (tmp_path / ".env").write_text(
+        "ZOTERO_API_KEY=dotenv-key\nZOTERO_USER_ID=dotenv-user\nZOTERO_DATA_DIR=dotenv-data\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ZOTERO_API_KEY", raising=False)
+    monkeypatch.delenv("ZOTERO_USER_ID", raising=False)
+    monkeypatch.delenv("ZOTERO_DATA_DIR", raising=False)
+
+    config = ZoteroApiConfig.from_dotenv()
+
+    assert config.api_key == "dotenv-key"
+    assert config.user_id == "dotenv-user"
+    assert config.data_dir == "dotenv-data"
+
+
+def test_zotero_api_config_prefers_shell_env_over_dotenv(tmp_path: Path, monkeypatch):
+    from paper_pipeline.zotero_api import ZoteroApiConfig
+
+    (tmp_path / ".env").write_text(
+        "ZOTERO_API_KEY=dotenv-key\nZOTERO_USER_ID=dotenv-user\nZOTERO_DATA_DIR=dotenv-data\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ZOTERO_API_KEY", "shell-key")
+    monkeypatch.setenv("ZOTERO_USER_ID", "shell-user")
+    monkeypatch.setenv("ZOTERO_DATA_DIR", "shell-data")
+
+    config = ZoteroApiConfig.from_dotenv()
+
+    assert config.api_key == "shell-key"
+    assert config.user_id == "shell-user"
+    assert config.data_dir == "shell-data"

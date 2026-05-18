@@ -4,10 +4,11 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Mapping
 
 import requests
 
+from .config import load_env
 from .contracts import PipelineError, Stage
 from .selection import CandidatePaper
 from .zotero_adapter import ZoteroItem
@@ -27,9 +28,17 @@ class ZoteroApiConfig:
 
     @classmethod
     def from_env(cls) -> "ZoteroApiConfig":
-        api_key = os.environ.get("ZOTERO_API_KEY", "").strip()
-        user_id = os.environ.get("ZOTERO_USER_ID", "").strip()
-        data_dir = os.environ.get("ZOTERO_DATA_DIR", "").strip()
+        return cls.from_mapping(os.environ)
+
+    @classmethod
+    def from_dotenv(cls, path: str | Path = ".env") -> "ZoteroApiConfig":
+        return cls.from_mapping(load_env(path))
+
+    @classmethod
+    def from_mapping(cls, env: Mapping[str, str]) -> "ZoteroApiConfig":
+        api_key = env.get("ZOTERO_API_KEY", "").strip()
+        user_id = env.get("ZOTERO_USER_ID", "").strip()
+        data_dir = env.get("ZOTERO_DATA_DIR", "").strip()
         if not api_key:
             raise ZoteroApiError("ZOTERO_API_KEY is not set")
         if not user_id:
@@ -63,6 +72,11 @@ class ZoteroApiAdapter:
     @classmethod
     def from_env(cls) -> "ZoteroApiAdapter":
         cfg = ZoteroApiConfig.from_env()
+        return cls(api_key=cfg.api_key, user_id=cfg.user_id, data_dir=cfg.data_dir, base_url=cfg.base_url)
+
+    @classmethod
+    def from_dotenv(cls, path: str | Path = ".env") -> "ZoteroApiAdapter":
+        cfg = ZoteroApiConfig.from_dotenv(path)
         return cls(api_key=cfg.api_key, user_id=cfg.user_id, data_dir=cfg.data_dir, base_url=cfg.base_url)
 
     def list_candidates(self) -> list[CandidatePaper]:

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from .analysis_engine import LocalPaperAnalyzer
 from .citekey_resolver import resolve_citekey_from_vault
-from .config import load_config
+from .config import load_config, load_env
 from .contracts import PipelineError, Stage
 from .lmstudio_chat import LMStudioChatClient
 from .obsidian_inventory import main as obsidian_inventory_main
@@ -38,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     zotero = sub.add_parser("zotero-dry-run")
     zotero.add_argument("--max-total", type=int, default=10)
     scan_obsidian = sub.add_parser("scan-obsidian")
-    scan_obsidian.add_argument("--vault-root", required=True)
+    scan_obsidian.add_argument("--vault-root", default=None)
     scan_obsidian.add_argument("--output", default="data/projects.jsonl")
     scan_zotero = sub.add_parser("scan-zotero")
     scan_zotero.add_argument("--offline-fixture", default=None)
@@ -98,7 +99,12 @@ def main(argv: list[str] | None = None) -> int:
             _safe_print(f"BLOCKED_MISSING_PDF {candidate.stage.value} {candidate.citekey} title={candidate.title}")
         return 0
     if args.command == "scan-obsidian":
-        return obsidian_inventory_main(["--vault-root", args.vault_root, "--output", args.output])
+        try:
+            vault_root = _scan_obsidian_vault_root(args.vault_root)
+        except PipelineError as exc:
+            print(f"scan-obsidian error: {exc}", file=sys.stderr)
+            return 2
+        return obsidian_inventory_main(["--vault-root", str(vault_root), "--output", args.output])
     if args.command == "scan-zotero":
         inventory_args = ["--output", args.output, "--papers-root", args.papers_root]
         if args.offline_fixture:
@@ -268,6 +274,15 @@ def _load_cli_config(config_path: str | None, vault_root: str | None):
     if vault_root is None:
         return load_config(config_path)
     return load_config(config_path, vault_root=vault_root)
+
+
+def _scan_obsidian_vault_root(cli_vault_root: str | None) -> Path:
+    if cli_vault_root is not None:
+        return Path(cli_vault_root).resolve()
+    env_mapping = load_env()
+    if "VAULT_ROOT" not in env_mapping:
+        raise PipelineError("VAULT_ROOT is required when --vault-root is not provided")
+    return load_config(None).paths.vault_root
 
 
 def _stage_from_cli(value: str | None):

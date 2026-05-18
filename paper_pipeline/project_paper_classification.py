@@ -122,8 +122,9 @@ def classify_project_paper_candidate(
 
     for _attempt in range(max_attempts):
         try:
-            response = str(client.complete_json(messages, classification_schema))
-            parsed = parse_llm_classification(response)
+            response = client.complete_json(messages, classification_schema)
+            response_text = _accepted_classification_text(response)
+            parsed = parse_llm_classification(response_text)
             managed = _managed_fields(candidate=candidate, paper=paper)
             normalized = validate_instance({**parsed.raw, **managed}, "llm_classification.schema.json")
             return normalized
@@ -251,6 +252,25 @@ def _load_single_json_object(text: str) -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise ValidationError("LLM classification output must be a JSON object")
     return loaded
+
+
+def _accepted_classification_text(response: object) -> str:
+    errors: list[str] = []
+    for channel, text in (
+        ("content", str(response)),
+        ("reasoning_content", str(getattr(response, "reasoning_content", "") or "")),
+    ):
+        try:
+            parse_llm_classification(text)
+        except Exception as exc:
+            errors.append(f"{channel}: {exc}")
+            continue
+        return text
+    raise ValidationError(
+        "LLM classification output must be a single JSON object without prose"
+        if not errors
+        else "; ".join(errors)
+    )
 
 
 __all__ = [

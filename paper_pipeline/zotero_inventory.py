@@ -86,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.offline_fixture:
             items = load_fixture_items(args.offline_fixture)
         else:
-            items = ZoteroApiAdapter.from_env().list_paper_items()
+            items = ZoteroApiAdapter.from_dotenv().list_paper_items()
         output = export_paper_inventory(items, output_path=args.output, papers_root=args.papers_root)
     except PipelineError as exc:
         print(f"scan-zotero error: {exc}", file=sys.stderr)

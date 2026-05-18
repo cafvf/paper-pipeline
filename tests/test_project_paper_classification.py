@@ -5,6 +5,7 @@ import pytest
 
 from paper_pipeline.cli import main as cli_main
 from paper_pipeline.contracts import PipelineError, ValidationError
+from paper_pipeline.lmstudio_chat import LLMCompletion
 from paper_pipeline.project_paper_classification import (
     CLASSIFICATION_PROMPT_HASH,
     build_classification_messages,
@@ -19,6 +20,16 @@ FIXTURE_ROOT = Path("tests/fixtures/contracts")
 
 class FixedClient:
     def __init__(self, response: str):
+        self.response = response
+        self.calls = 0
+
+    def complete_json(self, messages, schema):
+        self.calls += 1
+        return self.response
+
+
+class FixedCompletionClient:
+    def __init__(self, response: LLMCompletion):
         self.response = response
         self.calls = 0
 
@@ -117,6 +128,64 @@ def test_run_classify_retries_invalid_model_output_without_partial_output(tmp_pa
 
     assert client.calls == 2
     assert not output.exists()
+
+
+def test_run_classify_accepts_valid_reasoning_json_when_content_is_empty(tmp_path: Path):
+    candidates = tmp_path / "data" / "candidates.jsonl"
+    projects = tmp_path / "data" / "projects.jsonl"
+    papers = tmp_path / "data" / "papers.jsonl"
+    output = tmp_path / "data" / "classifications.jsonl"
+
+    write_jsonl(candidates, [_fixture("project_paper_match.valid.json")])
+    write_jsonl(projects, [_fixture("project_profile.valid.json")])
+    write_jsonl(papers, [_fixture("paper_profile.valid.json")])
+    client = FixedCompletionClient(
+        LLMCompletion(
+            "",
+            reasoning_content=json.dumps(_fixture("llm_classification.valid.json")),
+        )
+    )
+
+    rows = run_classify_from_jsonl(
+        candidates_path=candidates,
+        projects_path=projects,
+        papers_path=papers,
+        output_path=output,
+        client=client,
+    )
+
+    assert client.calls == 1
+    assert len(rows) == 1
+    assert rows[0]["citekey"] == "robertson1990soilclassification"
+
+
+def test_run_classify_prefers_valid_content_over_reasoning_fallback(tmp_path: Path):
+    candidates = tmp_path / "data" / "candidates.jsonl"
+    projects = tmp_path / "data" / "projects.jsonl"
+    papers = tmp_path / "data" / "papers.jsonl"
+    output = tmp_path / "data" / "classifications.jsonl"
+    valid = _fixture("llm_classification.valid.json")
+    alternate = {**valid, "utility_class": "background"}
+
+    write_jsonl(candidates, [_fixture("project_paper_match.valid.json")])
+    write_jsonl(projects, [_fixture("project_profile.valid.json")])
+    write_jsonl(papers, [_fixture("paper_profile.valid.json")])
+    client = FixedCompletionClient(
+        LLMCompletion(
+            json.dumps(valid),
+            reasoning_content=json.dumps(alternate),
+        )
+    )
+
+    rows = run_classify_from_jsonl(
+        candidates_path=candidates,
+        projects_path=projects,
+        papers_path=papers,
+        output_path=output,
+        client=client,
+    )
+
+    assert rows[0]["utility_class"] == valid["utility_class"]
 
 
 def test_cli_classify_writes_classifications_with_explicit_paths(tmp_path: Path, monkeypatch, capsys):
