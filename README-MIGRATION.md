@@ -1,6 +1,8 @@
 Migration notes
 ===============
 
+This document is historical migration guidance for extracting the project from a vault-local `x/LLM` folder. For the current repository architecture and roadmap, use `README.md`, `docs/README.md`, and `docs/architecture.md`.
+
 Steps to migrate code from a vault's `x/LLM` folder into this repository. Replace `<VAULT_ROOT>` and `<DEST>` with your paths.
 
 1) Create destination and copy files

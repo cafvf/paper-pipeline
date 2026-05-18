@@ -1,6 +1,6 @@
 # Roadmap
 
-This roadmap is frozen as the MVP 0.1 implementation contract as of 2026-05-06. Later changes should update the spec freeze note in `docs/workflow_spec.md`.
+This roadmap is the implementation-status snapshot for the modular Obsidian + Zotero assistant. The target workflow contract is still frozen in `docs/workflow_spec.md` (spec freeze date: 2026-05-06), while this page tracks what is already true in the repository as of **2026-05-18**.
 
 Status vocabulary:
 
@@ -12,49 +12,42 @@ Status vocabulary:
 
 | # | Project | Current status | Evidence found | Main gap | Next action |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Semantic foundation and contracts | partial | `contracts.py`, `llm_schema.py`, `reading_protocol.py` define reading stages, decisions, tags, and LLM schema validation. | No `ProjectProfile`, `PaperProfile`, `ProjectPaperMatch`, or project-paper utility taxonomy files. | Add schemas/configs for project-paper contracts before new behavior. |
-| 2 | Obsidian inventory | partial | `vault_index.py` indexes `Efforts/*` and selected `Atlas/*` Markdown with frontmatter, tags, links, headings, hashes. | Does not emit canonical `ProjectProfile` rows mapped from `Efforts/On`, `Efforts/Ongoing`, `Efforts/Simmering`, and `Efforts/Terminated`. | Add read-only `ProjectProfile` scanner with fixture tests. |
-| 3 | Zotero inventory | partial | `zotero_api.py` reads collections, item metadata, citekeys, tags, years, DOI, authors, and local PDF paths; `zotero_adapter.py` has memory adapter. | Inventory is tied to operational collections and returns `CandidatePaper`, not a neutral `PaperProfile` export/JSONL. | Add read-only metadata export command using mockable adapter. |
-| 4 | Local registry, cache, history | partial | `artifacts.py` writes per-paper JSON history and logs; `pdf_ingest.py` hashes PDFs. | No SQLite registry, no project/paper/prompt hashes, no pair-level reprocessing guard. | Design SQLite schema and add migration tests. |
-| 5 | Project-paper matching engine | partial | `selection.py` scores candidates with vault lexical context; `embeddings.py` can call LM Studio embeddings. | Matching is paper-stage oriented, not per active project; no top-N candidates per project. | Implement lexical MVP first, then optional embeddings. |
-| 6 | Article utility classifier | exists but needs refactor | `analysis_engine.py`, `lmstudio_chat.py`, and `llm_schema.py` classify papers with validated JSON. | Prompt/schema answer reading-stage questions, not "how does this paper help this project?". | Add new `LLMClassification` schema and prompt, keep existing analyzer separate. |
-| 7 | Human review bench in Obsidian | partial | `decision_notes.py`, `assessment_notes.py`, and `runner.py` render inbox decision notes with human YAML blocks. | Current note is one paper per decision; future review should aggregate one paper item with all project-paper decisions. | Add Markdown review report export that is read-only with respect to Zotero. |
-| 8 | Zotero tag synchronizer | exists but needs refactor | `zotero_plan.py`, `decision_applier.py`, `zotero_api.py` can plan and PUT collection/tag changes after decisions. | Future sync needs immutable dry-run plans with `plan_hash`, Expendable root collection check/create, removal from stage/triage collections on discard, and conservative tag removal limited to mutually exclusive stage tags. | Implement dry-run plan output and hash-verified apply for approved rows. |
-| 9A | PDF product extraction | partial | `pdf_ingest.py` and `reading_packet.py` can convert PDFs and build reading packets. | Needs independent layer 1/2/3 products under `papers/{citekey}/`; should not perform deep interpretation. | Split extraction from analysis and test it independently. |
-| 9C | Reference mining | not started | Protocol calls for mining references from review/deep papers; no direct module found. | Needs reference extraction/indexing from `.To Revise` and `.ToDig` papers, duplicate detection, non-DOI document types, separate fuzzy/non-DOI match review, missing-in-Zotero reporting, and attach/find-PDF recommendations. | Add independent reference-mining project after reference extraction exists. |
-| 9B | Deep PDF analyzer | partial | `analysis_engine.py` can analyze stage-specific packets with local LLM. | Should consume extracted products, not raw PDFs by default; must be approved/relevant-paper gated. | Reuse after PDF products exist and approval policy is clear. |
-| 10 | Technical notes and links in Obsidian | exists but needs refactor | `knowledge_application.py` and `note_patcher.py` create drafts/patches under configured vault paths after decisions. | Current outputs are literature/knowledge drafts; future note drafts go to the single Obsidian inbox and must require `.To Revise`/`.ToDig`, an available PDF, and extracted layer 1/2/3 products. | Document future note format and approval/PDF/product boundary. |
-| 11 | Reading, study, and reproduction planner | partial | `reading_plan.py` defines stage-specific reading steps; `run_summary.py` writes run summaries. | No project-level study plan with read-now/read-later/implement blocks. | Build from approved classifications after MVP 0.1. |
-| 12 | Gap, redundancy, and maturity auditor | not started | No direct module found. | No project-level coverage model or redundancy detector. | Defer until registry contains enough approved classifications. |
-| 13 | General orchestrator | partial | `cli.py` exposes `run`, `pilot-run`, `zotero-dry-run`; `runner.py` orchestrates current pipeline. | Future command set and scheduling policy do not exist; CLI still contains current operational workflow. | Implement after independent modules have stable outputs. |
+| 1 | Semantic foundation and contracts | ready | `schemas/project_profile.schema.json`, `schemas/paper_profile.schema.json`, `schemas/project_paper_match.schema.json`, `schemas/llm_classification.schema.json`, `configs/utility_taxonomy.yaml`, `tests/test_project1_contracts.py`. | Contracts exist, but later runtime commands still need to honor them end to end. | Keep schemas/configs stable while implementing missing commands. |
+| 2 | Obsidian inventory | partial | `paper_pipeline/obsidian_inventory.py`, CLI `scan-obsidian`, `tests/test_obsidian_inventory.py`. | Implemented as a standalone scanner, but not yet part of a finished end-to-end project-paper triage command. | Preserve as independent app and wire it into the future thin orchestrator. |
+| 3 | Zotero inventory | partial | `paper_pipeline/zotero_inventory.py`, CLI `scan-zotero`, `tests/test_zotero_inventory.py`, `paper_pipeline/zotero_api.py`, `paper_pipeline/zotero_adapter.py`. | Read-only inventory exists, but end-to-end project-paper flow is still incomplete. | Preserve as independent app and keep read-only behavior explicit. |
+| 4 | Local registry, cache, history | partial | `paper_pipeline/registry.py`, CLI `sync-registry`, `tests/test_registry.py`, pair-skip checks in `tests/test_project_paper_matching.py`. | Registry schema/sync exist, but runtime write-through for completed match/classification/review phases is not wired into the new flow. | Add post-success write-through and atomic completion/hash recording. |
+| 5 | Project-paper matching engine | partial | `paper_pipeline/project_paper_matching.py`, CLI `match`, `tests/test_project_paper_matching.py`. | Lexical MVP exists, but it still lacks production write-through and an evaluation harness beyond deterministic fixtures. | Keep lexical base, then add safe registry integration and later optional evaluation/embeddings improvements. |
+| 6 | Article utility classifier | partial | `paper_pipeline/project_paper_classification.py`, `schemas/llm_classification.schema.json`, `tests/test_project1_contracts.py`. | Parser/schema exist, but there is no runnable `classify` command yet. | Implement `classify` as the next independent command. |
+| 7 | Human review bench in Obsidian | partial | Legacy decision-note infrastructure exists in `paper_pipeline/decision_notes.py`, `paper_pipeline/assessment_notes.py`, and `paper_pipeline/decision_applier.py`; grouped project-paper review contract is documented in `docs/workflow_spec.md`. | No grouped `export-review` implementation yet for the new project-paper workflow. | Implement grouped citekey-level review export as the next output phase after `classify`. |
+| 8 | Zotero tag synchronizer | exists but needs refactor | `paper_pipeline/zotero_plan.py`, `paper_pipeline/decision_applier.py`, `paper_pipeline/zotero_api.py`. | Current path is legacy-oriented and does not yet enforce the future `plan_hash`-verified apply contract. | Defer until the read-only MVP chain is complete, then harden the apply path. |
+| 9A | PDF product extraction | partial | `paper_pipeline/pdf_ingest.py`, `paper_pipeline/reading_packet.py`, `paper_pipeline/analysis_engine.py`. | Existing PDF work is still tied to the legacy reading pipeline, not a standalone layer-1/2/3 product module. | Split extraction from deep analysis after the read-only MVP chain is complete. |
+| 9C | Reference mining | not started | The workflow contract exists in `docs/workflow_spec.md` and `docs/modules.md`, but there is no `reference_mining.py` yet. | No implemented reference index/mining pipeline. | Start only after reference extraction products exist. |
+| 9B | Deep PDF analyzer | partial | `paper_pipeline/analysis_engine.py`, `paper_pipeline/llm_schema.py`. | Existing analyzer is reading-stage oriented and should later consume extracted products rather than raw PDFs by default. | Reuse only after PDF products and approval boundaries are in place. |
+| 10 | Technical notes and links in Obsidian | exists but needs refactor | `paper_pipeline/knowledge_application.py`, `paper_pipeline/note_patcher.py`, tests around note patching/application. | Current path is legacy draft/patch behavior, not the future project-paper note-planning contract. | Defer until after read-only MVP and apply planning are stable. |
+| 11 | Reading, study, and reproduction planner | partial | `paper_pipeline/reading_plan.py`, `paper_pipeline/run_summary.py`. | Current planning is paper-stage oriented, not yet project-paper utility/study planning. | Build after approved classifications exist in the new flow. |
+| 12 | Gap, redundancy, and maturity auditor | not started | No direct module found. | No project-level coverage or redundancy auditor yet. | Defer until registry/history contains enough approved project-paper evidence. |
+| 13 | General orchestrator | partial | CLI already exposes independent commands for `scan-obsidian`, `scan-zotero`, `sync-registry`, and `match`; legacy orchestration still lives in `paper_pipeline/runner.py`. | The new thin `triage` orchestrator does not exist yet, and legacy `run`/`pilot-run` must not become its substitute. | Implement the new sequencing-only orchestrator after `classify` and `export-review` exist. |
 
 ## Recommended Order
 
-### Block 1: Safe Base
+### Immediate priority: close the read-only MVP chain
 
-1. Add semantic schemas/configs.
-2. Add read-only Obsidian project inventory.
-3. Add read-only Zotero paper inventory/export.
-4. Add SQLite registry design and migrations.
-5. Add project-paper matching.
-6. Add utility classification.
-7. Add grouped human-review Markdown export.
+1. Implement `classify`.
+2. Implement grouped `export-review`.
+3. Add safe registry write-through and completion/hash recording.
+4. Introduce the thin `triage` orchestrator that sequences only the independent commands.
 
-This block should answer: which Zotero papers are useful for which Obsidian projects, with justification and an initial reading queue, without changing Zotero or permanent Obsidian notes.
+This is the current shortest path to a coherent project-paper MVP:
 
-### Block 2: Controlled Curation
+```text
+scan-obsidian -> scan-zotero -> match -> classify -> export-review
+```
 
-8. Apply Zotero tags only for approved decisions.
-9. Generate permanent Obsidian article notes only after approval.
+### After the read-only MVP is stable
 
-### Block 3: Deep Study And Strategy
-
-10. Analyze PDFs only for approved relevant papers.
-11. Generate study/reproduction plans.
-12. Audit gaps, redundancy, and project maturity.
-13. Unify commands in a small local CLI.
-
-Project 13 is an integrator, not the owner of domain behavior. It should sequence independent commands, enforce scheduling/runtime limits, and resume nightly work.
+5. Harden approval-gated apply paths for Zotero and Obsidian.
+6. Split PDF product extraction from deep interpretation.
+7. Add reference mining, note planning, deep analysis, and higher-level planners/auditors.
 
 ## MVP 0.1 Acceptance
 

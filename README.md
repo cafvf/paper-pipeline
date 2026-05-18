@@ -11,16 +11,25 @@ Obsidian fica configurado separadamente como fonte/destino de notas.
 
 ## Estado Atual
 
-O pipeline atual e centrado em triagem de artigos a partir de colecoes
+O repositorio ainda contem o fluxo legado centrado em artigos e colecoes
 operacionais do Zotero, com apoio de contexto lexical do Obsidian, LM Studio,
-conversao de PDF, artefatos auditaveis e notas de decisao humana.
+conversao de PDF, artefatos auditaveis e notas de decisao humana. Esse caminho
+ainda e executado por `paper-pipeline run` / `pilot-run` e por
+`paper_pipeline/runner.py`.
 
-Uma rodada recente de auditoria documentou o caminho incremental para evoluir o
-projeto para uma assistente local Obsidian + Zotero baseada no par
-`projeto/objetivo <-> artigo`. Esse roadmap preserva a regra central de
-seguranca: primeiro ler, classificar e exportar revisoes; somente depois de
-aprovacao humana aplicar tags no Zotero ou criar notas permanentes no
-Obsidian.
+Ao mesmo tempo, a base do novo fluxo `projeto <-> artigo` ja existe em forma de
+comandos e modulos independentes: `scan-obsidian`, `scan-zotero`,
+`sync-registry`, `match`, `obsidian_inventory.py`, `zotero_inventory.py`,
+`registry.py`, `project_paper_matching.py` e
+`project_paper_classification.py`.
+
+O estado atual, portanto, e de migracao controlada: o alvo continua sendo uma
+assistente local Obsidian + Zotero com orquestrador fino, artefatos explicitos
+e aprovacao humana obrigatoria antes de qualquer escrita em Zotero ou notas
+permanentes do Obsidian. O gap imediato para fechar o MVP de leitura/triagem e
+completar a cadeia read-only:
+
+`scan-obsidian -> scan-zotero -> match -> classify -> export-review`
 
 ## Quickstart
 
@@ -60,23 +69,31 @@ Obsidian.
 
 ## Documentacao
 
+Comece por `docs/README.md`. Esse arquivo organiza quais documentos descrevem:
+
+- a historia atual do repositorio (legado vs. migracao `projeto <-> artigo`);
+- quais docs sao fonte de verdade para arquitetura, workflow e modulos;
+- o estado atual do MVP read-only e a ordem recomendada de leitura.
+
+Mapa rapido:
+
+- `docs/README.md`: mapa de documentacao e snapshot coerente do repositorio.
 - `docs/vision.md`: problema, camadas Obsidian/Zotero e limites da LLM.
 - `docs/architecture.md`: arquitetura atual, fluxo alvo e fronteiras de escrita.
-- `docs/roadmap.md`: aderencia aos 13 projetos planejados.
-- `docs/development_guidelines.md`: diretrizes de engenharia, TDD/XP/Clean Code/Spec-Driven e politica obrigatoria de testes.
-- `docs/efforts_authoring.md`: como estruturar notas em `Efforts/` para melhorar a extração de `ProjectProfile`.
+- `docs/workflow_spec.md`: contrato alvo de comandos e artefatos do MVP 0.1.
 - `docs/modules.md`: responsabilidades, entradas, saidas e efeitos colaterais.
+- `docs/roadmap.md`: status dos projetos/modulos planejados.
+- `docs/development_plan.md`: ordem atual de implementacao para fechar o MVP read-only.
+- `docs/development_guidelines.md`: diretrizes de engenharia, TDD/XP/Clean Code/Spec-Driven e politica obrigatoria de testes.
 - `docs/data_contracts.md`: contratos esperados para projeto, artigo, matching,
   classificacao, revisao humana e runs.
 - `docs/zotero_policy.md`: politica de leitura/escrita, tags e credenciais.
 - `docs/obsidian_policy.md`: politica de identificacao de projetos, revisoes e
   notas permanentes.
 - `docs/human_review_workflow.md`: fluxo recomendacao -> revisao -> aprovacao.
-- `docs/development_plan.md`: ciclos pequenos de implementacao e validacao.
-- `docs/workflow_spec.md`: comandos independentes, artefatos, reviews por
-  rodada, camadas de entrada da LLM e politica de execucao noturna.
 - `docs/reading_protocol_criteria.md`: criterios operacionais derivados do
   protocolo de leitura local do usuario para recomendacao de estagios Zotero.
+- `docs/efforts_authoring.md`: como estruturar notas em `Efforts/` para melhorar a extracao de `ProjectProfile`.
 
 ## Desenvolvimento
 

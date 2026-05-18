@@ -135,7 +135,7 @@ Project state should come from the existing `Efforts` layout rather than example
 
 ## SQLite And Cache Boundary
 
-The current repository stores per-paper artifacts and JSON history under `papers/`, but no SQLite registry was found. A future registry should store:
+The repository now has a SQLite registry implementation in `paper_pipeline/registry.py` with tables for:
 
 - `projects`;
 - `papers`;
@@ -145,7 +145,9 @@ The current repository stores per-paper artifacts and JSON history under `papers
 - `processing_runs`;
 - `hashes`.
 
-Hashes should prevent reprocessing unchanged pairs.
+Current evidence: `sync-registry` is exposed in `paper_pipeline/cli.py`, the schema exists in `paper_pipeline/registry.py`, and tests cover registry initialization, sync, rollback, and pair-level hash checks in `tests/test_registry.py`.
+
+Current remaining gap: the registry is already real, but runtime write-through for candidates, classifications, reviews, and completed hash state is not yet wired into the end-to-end project-paper command flow. Until that exists, file artifacts should remain the canonical interchange and registry skip behavior should only be trusted where completion is explicitly recorded.
 
 ## External-Service Safety
 

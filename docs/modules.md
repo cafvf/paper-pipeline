@@ -20,9 +20,9 @@
 | Artifacts | Store runtime JSON/history/logs. | Paper root and citekey. | File paths. | Writes under `papers_root`. | `paper_pipeline/artifacts.py` |
 | Runner | Orchestrate current pipeline. | Config, Zotero source, lexical index, analyzer. | `NightlyRunResult`. | Writes inbox notes/artifacts; may apply decisions. | `paper_pipeline/runner.py` |
 
-## Planned Project-Paper Modules
+## Project-Paper Modules And Target Boundaries
 
-Each planned module must have an independent MVP and tests. Integration defects found later should be fixed in the owning module, while the orchestrator remains a thin sequencing layer.
+Some of these modules already exist in partial or runnable form, while others are still future work. Each module must keep its own independent MVP and tests. Integration defects found later should be fixed in the owning module, while the orchestrator remains a thin sequencing layer.
 
 Each module should define its own task-level timeout defaults when execution risk requires it. The orchestrator should honor those module contracts instead of hardcoding every timeout centrally.
 
@@ -38,9 +38,9 @@ Side effects: none in scan mode.
 
 Tests expected: frontmatter parsing, project-state categorization from `Efforts`, path safety, malformed YAML tolerance, no full note body in output.
 
-Current related files: `paper_pipeline/vault_index.py`.
+Current files: `paper_pipeline/obsidian_inventory.py`, `tests/test_obsidian_inventory.py`.
 
-Future suggested files: `paper_pipeline/obsidian_inventory.py`, `tests/test_obsidian_inventory.py`.
+Legacy/related files: `paper_pipeline/vault_index.py`.
 
 Output artifact: `data/projects.jsonl`.
 
@@ -58,9 +58,9 @@ Side effects: API read only; no library writes.
 
 Tests expected: fake session pagination, citekey extraction, metadata normalization, metadata update without data loss, no secret logging.
 
-Current related files: `paper_pipeline/zotero_api.py`, `paper_pipeline/zotero_adapter.py`.
+Current files: `paper_pipeline/zotero_inventory.py`, `tests/test_zotero_inventory.py`.
 
-Future suggested files: `paper_pipeline/zotero_inventory.py`, `tests/test_zotero_inventory.py`.
+Legacy/related files: `paper_pipeline/zotero_api.py`, `paper_pipeline/zotero_adapter.py`.
 
 Output artifacts: `data/papers.jsonl` and `papers/{citekey}/metadata_snapshot.json`.
 
@@ -76,9 +76,9 @@ Side effects: writes local DB only.
 
 Tests expected: migrations, idempotent upserts, hash-based skip logic.
 
-Current related files: `paper_pipeline/artifacts.py`.
+Current files: `paper_pipeline/registry.py`, `tests/test_registry.py`.
 
-Future suggested files: `paper_pipeline/registry.py`, `migrations/`, `tests/test_registry.py`.
+Legacy/related files: `paper_pipeline/artifacts.py`.
 
 ### `matching`
 
@@ -92,9 +92,9 @@ Side effects: none, except optional cache writes through registry.
 
 Tests expected: deterministic lexical ranking, top-N limits, evidence generation, embedding fallback.
 
-Current related files: `paper_pipeline/selection.py`, `paper_pipeline/embeddings.py`.
+Current files: `paper_pipeline/project_paper_matching.py`, `tests/test_project_paper_matching.py`.
 
-Future suggested files: `paper_pipeline/matching.py`, `tests/test_matching.py`.
+Legacy/related files: `paper_pipeline/selection.py`, `paper_pipeline/embeddings.py`.
 
 ### `classification`
 
@@ -108,9 +108,9 @@ Side effects: LLM call and registry/artifact write.
 
 Tests expected: JSON Schema validation, invalid class rejection, prompt hash tracking, no prose outside JSON.
 
-Current related files: `paper_pipeline/llm_schema.py`, `paper_pipeline/lmstudio_chat.py`.
+Current files: `paper_pipeline/project_paper_classification.py`, `schemas/llm_classification.schema.json`, `tests/test_project1_contracts.py`.
 
-Future suggested files: `paper_pipeline/project_paper_classification.py`, `schemas/llm_classification.schema.json`.
+Legacy/related files: `paper_pipeline/llm_schema.py`, `paper_pipeline/lmstudio_chat.py`.
 
 LLM input policy: local LLM by default; metadata-only for the first classifier; overview/section/technical products only after extraction; raw PDF only as explicit fallback.
 
