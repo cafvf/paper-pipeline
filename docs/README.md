@@ -39,6 +39,8 @@ The most important documentation rule for this repository is: **do not mix the l
    - implementation-status snapshot across the planned modules/projects
 7. **`docs/development_plan.md`**
    - the current execution order for finishing the read-only MVP and then hardening apply/deeper stages
+8. **`docs/mvp_phase_specs.md`**
+   - detailed executable specifications for migration Phases 0, 1, and 2
 
 ## Which Document Is Authoritative For What?
 
@@ -55,6 +57,7 @@ The most important documentation rule for this repository is: **do not mix the l
 ### Current implementation status
 - `docs/roadmap.md`
 - `docs/development_plan.md`
+- `docs/mvp_phase_specs.md`
 
 ### Contracts and safety policy
 - `docs/data_contracts.md`

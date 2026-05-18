@@ -125,6 +125,8 @@ Main remaining gap:
 
 These cycles replace the previous generic ordering. Complete them in order unless a later review proves the sequence wrong.
 
+Detailed executable specs for Cycle 1 and Cycles 2–3 now live in `docs/mvp_phase_specs.md`. Use this plan for ordering and scope; use the phase-spec document for command contracts, boundaries, failure modes, and promotion proof.
+
 ## Cycle 1: Freeze The Boundary Between Legacy And New Flow
 
 Purpose:
