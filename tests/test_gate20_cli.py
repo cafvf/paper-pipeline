@@ -77,6 +77,38 @@ def test_cli_parser_supports_scan_zotero_offline_fixture():
     assert args.papers_root == "papers"
 
 
+def test_cli_parser_supports_classify():
+    args = build_parser().parse_args(
+        [
+            "classify",
+            "--candidates",
+            "data/candidates.jsonl",
+            "--projects",
+            "data/projects.jsonl",
+            "--papers",
+            "data/papers.jsonl",
+            "--output",
+            "data/classifications.jsonl",
+            "--max-attempts",
+            "3",
+            "--lm-timeout-seconds",
+            "600",
+            "--max-output-tokens",
+            "2048",
+            "--save-llm-payloads",
+        ]
+    )
+    assert args.command == "classify"
+    assert args.candidates == "data/candidates.jsonl"
+    assert args.projects == "data/projects.jsonl"
+    assert args.papers == "data/papers.jsonl"
+    assert args.output == "data/classifications.jsonl"
+    assert args.max_attempts == 3
+    assert args.lm_timeout_seconds == 600
+    assert args.max_output_tokens == 2048
+    assert args.save_llm_payloads is True
+
+
 def test_cli_parser_supports_pilot_run():
     args = build_parser().parse_args(
         [

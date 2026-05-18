@@ -9,6 +9,7 @@ from .config import load_config
 from .contracts import PipelineError, Stage
 from .lmstudio_chat import LMStudioChatClient
 from .obsidian_inventory import main as obsidian_inventory_main
+from .project_paper_classification import run_classify_from_jsonl
 from .project_paper_matching import run_match_from_jsonl
 from .registry import sync_registry_from_jsonl
 from .runner import run_once
@@ -54,6 +55,17 @@ def build_parser() -> argparse.ArgumentParser:
     match.add_argument("--top-n", type=int, default=20)
     match.add_argument("--include-states", default="on,ongoing")
     match.add_argument("--registry-db", default=None)
+    classify = sub.add_parser("classify")
+    classify.add_argument("--vault-root", default=None)
+    classify.add_argument("--config", default=None)
+    classify.add_argument("--candidates", default="data/candidates.jsonl")
+    classify.add_argument("--projects", default="data/projects.jsonl")
+    classify.add_argument("--papers", default="data/papers.jsonl")
+    classify.add_argument("--output", default="data/classifications.jsonl")
+    classify.add_argument("--max-attempts", type=int, default=2)
+    classify.add_argument("--lm-timeout-seconds", type=int, default=None)
+    classify.add_argument("--max-output-tokens", type=int, default=None)
+    classify.add_argument("--save-llm-payloads", action="store_true")
     pilot = sub.add_parser("pilot-run")
     pilot.add_argument("--vault-root", default=None)
     pilot.add_argument("--config", default=None)
@@ -127,6 +139,28 @@ def main(argv: list[str] | None = None) -> int:
         )
         for warning in report.warnings:
             _safe_print(f"WARNING {warning}")
+        return 0
+    if args.command == "classify":
+        try:
+            config = _load_cli_config(args.config, args.vault_root)
+            if args.lm_timeout_seconds is not None:
+                config = _with_lm_timeout(config, args.lm_timeout_seconds)
+            if args.max_output_tokens is not None:
+                config = _with_max_output_tokens(config, args.max_output_tokens)
+            if args.save_llm_payloads:
+                config = _with_save_lm_payloads(config)
+            classifications = run_classify_from_jsonl(
+                candidates_path=args.candidates,
+                projects_path=args.projects,
+                papers_path=args.papers,
+                output_path=args.output,
+                client=LMStudioChatClient(config.lmstudio),
+                max_attempts=args.max_attempts,
+            )
+        except PipelineError as exc:
+            print(_classify_error_message(str(exc)), file=sys.stderr)
+            return 2
+        _safe_print(f"classifications={len(classifications)} output={args.output}")
         return 0
     if args.command == "pilot-run":
         return _run_cycle(args)
@@ -270,6 +304,23 @@ def _match_error_message(error: str) -> str:
             "  uv run paper-pipeline scan-zotero --output data/papers.jsonl --papers-root papers"
         )
     return f"match error: {error}"
+
+
+def _classify_error_message(error: str) -> str:
+    if "candidates JSONL not found" in error:
+        return (
+            f"classify error: {error}\n"
+            "Generate the candidates first:\n"
+            "  uv run paper-pipeline match --projects data/projects.jsonl --papers data/papers.jsonl --output data/candidates.jsonl"
+        )
+    if "projects JSONL not found" in error or "papers JSONL not found" in error:
+        return (
+            f"classify error: {error}\n"
+            "Generate the missing inventories first:\n"
+            "  uv run paper-pipeline scan-obsidian --vault-root /path/to/vault --output data/projects.jsonl\n"
+            "  uv run paper-pipeline scan-zotero --output data/papers.jsonl --papers-root papers"
+        )
+    return f"classify error: {error}"
 
 
 def _with_lm_timeout(config, timeout_seconds: int):

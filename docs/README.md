@@ -12,9 +12,9 @@ Start here when you need to understand the repository without reconstructing the
    - purpose: the original Zotero operational-collection workflow with decision notes, optional apply, and paper-level artifacts
 
 2. **Project-paper migration path**
-   - current independent commands: `scan-obsidian`, `scan-zotero`, `sync-registry`, `match`
+   - current independent commands: `scan-obsidian`, `scan-zotero`, `sync-registry`, `match`, `classify`
    - implemented foundations: `obsidian_inventory.py`, `zotero_inventory.py`, `registry.py`, `project_paper_matching.py`, `project_paper_classification.py`
-   - still missing from the runnable CLI chain: `classify`, `export-review`, and the thin `triage` orchestrator
+   - still missing from the runnable CLI chain: `export-review` and the thin `triage` orchestrator
    - current implementation target: complete the read-only chain
 
    ```text
@@ -77,10 +77,9 @@ Implemented enough to use as the current safe base:
 - read-only Zotero inventory
 - registry schema and sync command
 - lexical project-paper matching
-- classification schema parsing/validation
+- metadata-only project-paper `classify` command with schema-validated JSONL output
 
 Still missing for an end-to-end project-paper MVP:
-- runnable `classify` command
 - grouped `export-review` command
 - safe registry write-through for completed runtime phases
 - new thin `triage` orchestrator command

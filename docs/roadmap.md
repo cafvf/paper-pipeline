@@ -17,7 +17,7 @@ Status vocabulary:
 | 3 | Zotero inventory | partial | `paper_pipeline/zotero_inventory.py`, CLI `scan-zotero`, `tests/test_zotero_inventory.py`, `paper_pipeline/zotero_api.py`, `paper_pipeline/zotero_adapter.py`. | Read-only inventory exists, but end-to-end project-paper flow is still incomplete. | Preserve as independent app and keep read-only behavior explicit. |
 | 4 | Local registry, cache, history | partial | `paper_pipeline/registry.py`, CLI `sync-registry`, `tests/test_registry.py`, pair-skip checks in `tests/test_project_paper_matching.py`. | Registry schema/sync exist, but runtime write-through for completed match/classification/review phases is not wired into the new flow. | Add post-success write-through and atomic completion/hash recording. |
 | 5 | Project-paper matching engine | partial | `paper_pipeline/project_paper_matching.py`, CLI `match`, `tests/test_project_paper_matching.py`. | Lexical MVP exists, but it still lacks production write-through and an evaluation harness beyond deterministic fixtures. | Keep lexical base, then add safe registry integration and later optional evaluation/embeddings improvements. |
-| 6 | Article utility classifier | partial | `paper_pipeline/project_paper_classification.py`, `schemas/llm_classification.schema.json`, `tests/test_project1_contracts.py`. | Parser/schema exist, but there is no runnable `classify` command yet. | Implement `classify` as the next independent command. |
+| 6 | Article utility classifier | partial | `paper_pipeline/project_paper_classification.py`, CLI `classify`, `schemas/llm_classification.schema.json`, `tests/test_project1_contracts.py`, `tests/test_project_paper_classification.py`. | Runnable metadata-only classification now exists, but registry write-through and downstream review export are still incomplete. | Keep `classify` independent, then feed it into grouped `export-review`. |
 | 7 | Human review bench in Obsidian | partial | Legacy decision-note infrastructure exists in `paper_pipeline/decision_notes.py`, `paper_pipeline/assessment_notes.py`, and `paper_pipeline/decision_applier.py`; grouped project-paper review contract is documented in `docs/workflow_spec.md`. | No grouped `export-review` implementation yet for the new project-paper workflow. | Implement grouped citekey-level review export as the next output phase after `classify`. |
 | 8 | Zotero tag synchronizer | exists but needs refactor | `paper_pipeline/zotero_plan.py`, `paper_pipeline/decision_applier.py`, `paper_pipeline/zotero_api.py`. | Current path is legacy-oriented and does not yet enforce the future `plan_hash`-verified apply contract. | Defer until the read-only MVP chain is complete, then harden the apply path. |
 | 9A | PDF product extraction | partial | `paper_pipeline/pdf_ingest.py`, `paper_pipeline/reading_packet.py`, `paper_pipeline/analysis_engine.py`. | Existing PDF work is still tied to the legacy reading pipeline, not a standalone layer-1/2/3 product module. | Split extraction from deep analysis after the read-only MVP chain is complete. |
@@ -32,10 +32,9 @@ Status vocabulary:
 
 ### Immediate priority: close the read-only MVP chain
 
-1. Implement `classify`.
-2. Implement grouped `export-review`.
-3. Add safe registry write-through and completion/hash recording.
-4. Introduce the thin `triage` orchestrator that sequences only the independent commands.
+1. Implement grouped `export-review`.
+2. Add safe registry write-through and completion/hash recording.
+3. Introduce the thin `triage` orchestrator that sequences only the independent commands.
 
 This is the current shortest path to a coherent project-paper MVP:
 

@@ -23,12 +23,11 @@ Validated on the current branch:
 
 Known gaps from review:
 
-1. there is no runnable `classify` command for the project-paper flow;
-2. there is no grouped `export-review` implementation;
-3. the legacy `runner.py` still owns paper-stage orchestration and should not be reused as the new project-paper orchestrator;
-4. registry skip logic exists, but candidate/classification/hash write-through is not yet wired into the runtime flow;
-5. legacy approval paths can still lead to direct Zotero writes without the future `plan_hash`-verified apply contract;
-6. local security audit currently fails if `.env` with real secrets remains under the repo root.
+1. there is no grouped `export-review` implementation;
+2. the legacy `runner.py` still owns paper-stage orchestration and should not be reused as the new project-paper orchestrator;
+3. registry skip logic exists, but candidate/classification/hash write-through is not yet wired into the runtime flow;
+4. legacy approval paths can still lead to direct Zotero writes without the future `plan_hash`-verified apply contract;
+5. local security audit currently fails if `.env` with real secrets remains under the repo root.
 
 ## Engineering Guardrails
 
@@ -129,6 +128,10 @@ Detailed executable specs for Cycle 1 and Cycles 2–3 now live in `docs/mvp_pha
 
 ## Cycle 1: Freeze The Boundary Between Legacy And New Flow
 
+Status:
+
+Implemented on the current branch as the repository baseline. Preserve these boundaries while landing later cycles.
+
 Purpose:
 
 Make the project-paper path explicit and prevent accidental reuse of legacy paper-stage orchestration.
@@ -155,6 +158,10 @@ Mitigation:
 - require all new MVP work to land behind independent commands and explicit artifacts.
 
 ## Cycle 2: Utility Classification Execution MVP
+
+Status:
+
+Implemented on the current branch as a metadata-only standalone command. Preserve its independence from `runner.py` and use Cycle 3 as the next execution priority.
 
 Purpose:
 
