@@ -45,7 +45,7 @@ PHASE 2 — export-review
   input:
     data/classifications.jsonl
   output:
-    data/review.md
+    data/review-project-papers-YYYY-MM-DD.md
   depends on:
     Phase 1 classify
   enables:
@@ -203,7 +203,7 @@ The canonical handoff between migration phases is explicit file artifacts such a
 - `data/papers.jsonl`
 - `data/candidates.jsonl`
 - `data/classifications.jsonl`
-- `data/review.md`
+- `data/review-project-papers-YYYY-MM-DD.md`
 
 Registry state may mirror or cache phase completion, but it does not replace artifact contracts during MVP migration.
 
@@ -364,6 +364,8 @@ uv run paper-pipeline classify
 - `--output` default `data/classifications.jsonl`
 
 ### Optional execution controls
+- `--max-candidates` safety cap for the current LLM run
+- `--paper-stages` to restrict the current run to candidate papers already in selected Zotero stages
 - model/prompt options
 - fake/fixture mode for tests
 - registry db path for future write-through, but not required for the first correct implementation
@@ -393,6 +395,10 @@ No fallback to broader paper analysis unless explicitly designed later.
 ### Canonical output file
 `data/classifications.jsonl`
 
+### Auxiliary progress artifacts
+- `data/classifications.progress.json`
+- `data/classifications/*.json`
+
 ### Each row must be a validated `LLMClassification`
 At minimum it must include:
 - `project_id`
@@ -409,6 +415,8 @@ Plus artifact metadata needed for auditability.
 - one JSON object per line
 - deterministic key ordering in persisted JSON
 - atomic file write for full-run output
+- one validated per-candidate JSON artifact written atomically after each successful classification
+- progress manifest updated after each successful classification and on terminal failure/completion
 - no partial corrupt artifact on invalid result
 
 ## Behavioral Rules
@@ -457,10 +465,24 @@ If not:
 Every classification row must pass:
 - single-object parse validation
 - schema validation against `llm_classification.schema.json`
+- semantic coherence validation between:
+  - `utility_class`
+  - `recommended_action`
+  - `recommended_zotero_stage`
+  - `current_zotero_stage`
+
+At minimum, Phase 1 must reject contradictions such as:
+- useful/approved-looking classifications paired with `Expendable`
+- `read_now` paired with `Expendable`
+- `extract_equations` or `reproduce_code` outside `.ToDig`
+- metadata-only demotion of papers already in `.To Revise` or `.ToDig`
+- `irrelevant_now` paired with non-ignore actions
 
 ### 6. Persistence
 - write only validated rows
 - output write should be atomic
+- write one validated per-candidate file for each completed candidate
+- keep progress visible through a manifest and the per-candidate artifact count
 - invalid output must not leave a half-written artifact
 
 ## Error-Handling Rules
@@ -505,7 +527,8 @@ Phase 1 is complete when all are true:
 7. multi-object output fails tests
 8. no Zotero writes occur
 9. no permanent Obsidian writes occur
-10. the command is usable independently of the future orchestrator
+10. incoherent stage/action/utility combinations fail validation and do not persist
+11. the command is usable independently of the future orchestrator
 
 ## Required Tests
 
@@ -518,6 +541,10 @@ Phase 1 is complete when all are true:
 - reject invalid `recommended_action`
 - reject invalid `confidence`
 - reject invalid `input_layer`
+- reject useful/approved-looking classifications paired with `Expendable`
+- reject `irrelevant_now` paired with active reading actions
+- reject `extract_equations` or `reproduce_code` outside `.ToDig`
+- reject metadata-only demotion from `.To Revise` or `.ToDig`
 
 ### Integration tests
 - load fixture candidates/projects/papers
@@ -525,6 +552,8 @@ Phase 1 is complete when all are true:
 - fake/recorded LLM path works
 - missing referenced project fails clearly
 - missing referenced paper fails clearly
+- persist one candidate artifact per successful completed candidate
+- mark progress failed without writing partial final JSONL when a later candidate fails
 - invalid LLM response does not persist partial output
 - atomic output behavior
 
@@ -548,7 +577,10 @@ Phase 1 is complete when all are true:
 4. **Artifact corruption**
    - invalid output leaves partial JSONL
 
-5. **Schema bypass**
+5. **Semantic contradiction**
+   - utility/action/stage recommendation combinations contradict the reading policy
+
+6. **Schema bypass**
    - raw model output gets written without validation
 
 ## Promotion Proof
@@ -606,7 +638,7 @@ classify
   -> data/classifications.jsonl
 
 export-review
-  -> data/review.md
+  -> data/review-project-papers-YYYY-MM-DD.md
 ```
 
 ### Upstream dependency
@@ -647,12 +679,12 @@ uv run paper-pipeline export-review
 
 ### Preferred explicit inputs
 - `--classifications` default `data/classifications.jsonl`
-- `--output` default `data/review.md`
+- `--output` default `data/review-project-papers-YYYY-MM-DD.md`
 - optional `--date` or `--review-id` override for deterministic tests / stable filenames
 - optional configured inbox/output path support consistent with `docs/workflow_spec.md`
 
 ### Output naming policy
-For the first independent implementation, the canonical local output may default to `data/review.md`.
+For the first independent implementation, the canonical local output defaults to `data/review-project-papers-YYYY-MM-DD.md`.
 
 When the configured inbox/output policy is enabled, filenames should follow the workflow contract:
 - `review-project-papers-YYYY-MM-DD.md`
@@ -670,7 +702,7 @@ The exporter may also require paper metadata already present in the classificati
 ## Output Contract
 
 ### Canonical output file
-`data/review.md` for the standalone local default.
+`data/review-project-papers-YYYY-MM-DD.md` for the standalone local default.
 
 ### Output semantics
 The output must be:

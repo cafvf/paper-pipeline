@@ -12,14 +12,15 @@ Start here when you need to understand the repository without reconstructing the
    - purpose: the original Zotero operational-collection workflow with decision notes, optional apply, and paper-level artifacts
 
 2. **Project-paper migration path**
-   - current independent commands: `scan-obsidian`, `scan-zotero`, `sync-registry`, `match`, `classify`
-   - implemented foundations: `obsidian_inventory.py`, `zotero_inventory.py`, `registry.py`, `project_paper_matching.py`, `project_paper_classification.py`
-   - still missing from the runnable CLI chain: `export-review` and the thin `triage` orchestrator
-   - current implementation target: complete the read-only chain
+   - current independent commands: `scan-obsidian`, `scan-zotero`, `sync-registry`, `match`, `classify`, `export-review`
+   - implemented foundations: `obsidian_inventory.py`, `zotero_inventory.py`, `registry.py`, `project_paper_matching.py`, `project_paper_classification.py`, `export_review.py`
+   - current runnable read-only chain:
 
    ```text
    scan-obsidian -> scan-zotero -> match -> classify -> export-review
    ```
+
+   - next missing owner: the thin nightly `triage` orchestrator that sequences those commands without absorbing their business logic
 
 The most important documentation rule for this repository is: **do not mix the legacy paper-stage path with the new project-paper target path**.
 
@@ -41,6 +42,8 @@ The most important documentation rule for this repository is: **do not mix the l
    - the current execution order for finishing the read-only MVP and then hardening apply/deeper stages
 8. **`docs/mvp_phase_specs.md`**
    - detailed executable specifications for migration Phases 0, 1, and 2
+9. **`docs/next_session_prompt.md`**
+   - reusable handoff prompt for the next development session
 
 ## Which Document Is Authoritative For What?
 
@@ -76,13 +79,14 @@ Implemented enough to use as the current safe base:
 - read-only Obsidian inventory
 - read-only Zotero inventory
 - registry schema and sync command
-- lexical project-paper matching
-- metadata-only project-paper `classify` command with schema-validated JSONL output
+- lexical project-paper matching with stage filters and total candidate cap
+- metadata-only project-paper `classify` command with schema-validated JSONL output, semantic coherence checks, and per-run safety caps
+- grouped `export-review` command with one Markdown review file per round
 
-Still missing for an end-to-end project-paper MVP:
-- grouped `export-review` command
+Current next gaps for the active development phase:
 - safe registry write-through for completed runtime phases
-- new thin `triage` orchestrator command
+- thin nightly `triage` orchestrator command
+- per-layer evaluation tracking so nightly runs skip papers already evaluated in their current Zotero layer
 
 ## Historical / situational docs
 

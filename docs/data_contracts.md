@@ -204,6 +204,13 @@ Allowed `input_layer` values:
 
 `recommended_zotero_stage` is a reading-depth recommendation, not a project-utility decision. It may use the user's reading protocol/gates as secondary evidence. Human review must still decide project utility project by project.
 
+Even so, Phase 1 must enforce semantic coherence:
+
+- `Expendable` is valid only for `irrelevant_now` + `ignore_for_now` style outcomes;
+- useful/approved-looking classifications must not recommend `Expendable`;
+- `extract_equations` and `reproduce_code` require `.ToDig`;
+- metadata-only Phase 1 classification must not demote papers already in `.To Revise` or `.ToDig`.
+
 Initial `.ToDig` recommendation threshold: max project-paper adherence score >= `0.80`, or ToDig protocol gate passed.
 
 ## PaperProduct
@@ -402,7 +409,7 @@ Human review captures the user's decision and is the only authorization for writ
 ```json
 {
   "review_id": "2026-05-06-initial-triage",
-  "review_path": "data/review.md",
+  "review_path": "data/review-project-papers-2026-05-06.md",
   "review_item_id": "robertson1990soilclassification",
   "citekey": "robertson1990soilclassification",
   "decision": "decided",

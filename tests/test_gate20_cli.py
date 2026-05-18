@@ -1,6 +1,11 @@
 import json
 
-from paper_pipeline.cli import _with_lm_timeout, _with_max_output_tokens, build_parser, main
+from paper_pipeline.cli import (
+    _with_lm_timeout,
+    _with_max_output_tokens,
+    build_parser,
+    main,
+)
 from paper_pipeline.config import default_config
 from paper_pipeline.zotero_adapter import ZoteroItem
 
@@ -78,6 +83,36 @@ def test_cli_parser_supports_scan_zotero_offline_fixture():
     assert args.papers_root == "papers"
 
 
+def test_cli_parser_supports_match_filters():
+    args = build_parser().parse_args(
+        [
+            "match",
+            "--projects",
+            "data/projects.jsonl",
+            "--papers",
+            "data/papers.jsonl",
+            "--output",
+            "data/candidates.jsonl",
+            "--top-n",
+            "8",
+            "--max-candidates-total",
+            "8",
+            "--paper-stages",
+            ".ToLook,.To Revise",
+            "--include-states",
+            "on,ongoing",
+        ]
+    )
+    assert args.command == "match"
+    assert args.projects == "data/projects.jsonl"
+    assert args.papers == "data/papers.jsonl"
+    assert args.output == "data/candidates.jsonl"
+    assert args.top_n == 8
+    assert args.max_candidates_total == 8
+    assert args.paper_stages == ".ToLook,.To Revise"
+    assert args.include_states == "on,ongoing"
+
+
 def test_cli_parser_supports_classify():
     args = build_parser().parse_args(
         [
@@ -90,6 +125,10 @@ def test_cli_parser_supports_classify():
             "data/papers.jsonl",
             "--output",
             "data/classifications.jsonl",
+            "--max-candidates",
+            "8",
+            "--paper-stages",
+            ".ToLook,.ToDig",
             "--max-attempts",
             "3",
             "--lm-timeout-seconds",
@@ -104,6 +143,8 @@ def test_cli_parser_supports_classify():
     assert args.projects == "data/projects.jsonl"
     assert args.papers == "data/papers.jsonl"
     assert args.output == "data/classifications.jsonl"
+    assert args.max_candidates == 8
+    assert args.paper_stages == ".ToLook,.ToDig"
     assert args.max_attempts == 3
     assert args.lm_timeout_seconds == 600
     assert args.max_output_tokens == 2048
@@ -155,7 +196,9 @@ def test_cli_lm_overrides_apply_to_stage_specific_budgets(tmp_path):
     assert cfg.lmstudio.deep_stage_max_output_tokens == 2048
 
 
-def test_cli_run_loads_dotenv_without_vault_root_argument(tmp_path, monkeypatch, capsys):
+def test_cli_run_loads_dotenv_without_vault_root_argument(
+    tmp_path, monkeypatch, capsys
+):
     vault = tmp_path / "vault"
     inbox = vault / "Inbox" / "Human Review"
     inbox.mkdir(parents=True)
@@ -174,7 +217,9 @@ def test_cli_run_loads_dotenv_without_vault_root_argument(tmp_path, monkeypatch,
     assert "dry-run" in capsys.readouterr().out
 
 
-def test_cli_scan_obsidian_loads_dotenv_without_vault_root_argument(tmp_path, monkeypatch, capsys):
+def test_cli_scan_obsidian_loads_dotenv_without_vault_root_argument(
+    tmp_path, monkeypatch, capsys
+):
     vault = tmp_path / "vault"
     (vault / "Efforts" / "On").mkdir(parents=True)
     (vault / "Efforts" / "On" / "Runnable.md").write_text(
@@ -202,21 +247,30 @@ def test_cli_scan_obsidian_prefers_cli_vault_root_over_dotenv(tmp_path, monkeypa
     cli_vault = tmp_path / "cli-vault"
     (env_vault / "Efforts" / "On").mkdir(parents=True)
     (cli_vault / "Efforts" / "On").mkdir(parents=True)
-    (env_vault / "Efforts" / "On" / "Env Note.md").write_text("# Env Note\n", encoding="utf-8")
-    (cli_vault / "Efforts" / "On" / "CLI Note.md").write_text("# CLI Note\n", encoding="utf-8")
+    (env_vault / "Efforts" / "On" / "Env Note.md").write_text(
+        "# Env Note\n", encoding="utf-8"
+    )
+    (cli_vault / "Efforts" / "On" / "CLI Note.md").write_text(
+        "# CLI Note\n", encoding="utf-8"
+    )
     (tmp_path / ".env").write_text(f"VAULT_ROOT={env_vault}\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("VAULT_ROOT", raising=False)
 
     output = tmp_path / "data" / "projects.jsonl"
-    assert main(["scan-obsidian", "--vault-root", str(cli_vault), "--output", str(output)]) == 0
+    assert (
+        main(["scan-obsidian", "--vault-root", str(cli_vault), "--output", str(output)])
+        == 0
+    )
 
     lines = output.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 1
     assert "CLI Note" in lines[0]
 
 
-def test_cli_scan_zotero_loads_dotenv_credentials_without_shell_exports(tmp_path, monkeypatch, capsys):
+def test_cli_scan_zotero_loads_dotenv_credentials_without_shell_exports(
+    tmp_path, monkeypatch, capsys
+):
     captured = {}
     (tmp_path / ".env").write_text(
         "ZOTERO_API_KEY=dotenv-key\nZOTERO_USER_ID=dotenv-user\nZOTERO_DATA_DIR=dotenv-data\n",
@@ -241,13 +295,25 @@ def test_cli_scan_zotero_loads_dotenv_credentials_without_shell_exports(tmp_path
             )
         ]
 
-    monkeypatch.setattr("paper_pipeline.zotero_api.ZoteroApiAdapter.list_paper_items", fake_list_paper_items)
+    monkeypatch.setattr(
+        "paper_pipeline.zotero_api.ZoteroApiAdapter.list_paper_items",
+        fake_list_paper_items,
+    )
 
     output = tmp_path / "data" / "papers.jsonl"
     papers_root = tmp_path / "papers"
-    assert main(["scan-zotero", "--output", str(output), "--papers-root", str(papers_root)]) == 0
+    assert (
+        main(
+            ["scan-zotero", "--output", str(output), "--papers-root", str(papers_root)]
+        )
+        == 0
+    )
 
-    assert captured == {"api_key": "dotenv-key", "user_id": "dotenv-user", "data_dir": "dotenv-data"}
+    assert captured == {
+        "api_key": "dotenv-key",
+        "user_id": "dotenv-user",
+        "data_dir": "dotenv-data",
+    }
     row = json.loads(output.read_text(encoding="utf-8"))
     assert row["citekey"] == "dotenv2026"
     assert "papers=1" in capsys.readouterr().out

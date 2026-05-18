@@ -8,6 +8,12 @@ from .analysis_engine import LocalPaperAnalyzer
 from .citekey_resolver import resolve_citekey_from_vault
 from .config import load_config, load_env
 from .contracts import PipelineError, Stage
+from .export_review import (
+    default_review_date,
+    default_review_id,
+    default_review_output_path,
+    run_export_review_from_jsonl,
+)
 from .lmstudio_chat import LMStudioChatClient
 from .obsidian_inventory import main as obsidian_inventory_main
 from .project_paper_classification import run_classify_from_jsonl
@@ -54,6 +60,8 @@ def build_parser() -> argparse.ArgumentParser:
     match.add_argument("--papers", default="data/papers.jsonl")
     match.add_argument("--output", default="data/candidates.jsonl")
     match.add_argument("--top-n", type=int, default=20)
+    match.add_argument("--max-candidates-total", type=int, default=None)
+    match.add_argument("--paper-stages", default=None)
     match.add_argument("--include-states", default="on,ongoing")
     match.add_argument("--registry-db", default=None)
     classify = sub.add_parser("classify")
@@ -63,10 +71,19 @@ def build_parser() -> argparse.ArgumentParser:
     classify.add_argument("--projects", default="data/projects.jsonl")
     classify.add_argument("--papers", default="data/papers.jsonl")
     classify.add_argument("--output", default="data/classifications.jsonl")
+    classify.add_argument("--max-candidates", type=int, default=None)
+    classify.add_argument("--paper-stages", default=None)
     classify.add_argument("--max-attempts", type=int, default=2)
     classify.add_argument("--lm-timeout-seconds", type=int, default=None)
     classify.add_argument("--max-output-tokens", type=int, default=None)
     classify.add_argument("--save-llm-payloads", action="store_true")
+    export_review = sub.add_parser("export-review")
+    export_review.add_argument(
+        "--classifications", default="data/classifications.jsonl"
+    )
+    export_review.add_argument("--output", default=None)
+    export_review.add_argument("--date", default=None)
+    export_review.add_argument("--review-id", default=None)
     pilot = sub.add_parser("pilot-run")
     pilot.add_argument("--vault-root", default=None)
     pilot.add_argument("--config", default=None)
@@ -90,13 +107,19 @@ def main(argv: list[str] | None = None) -> int:
         adapter = ZoteroApiAdapter.from_env()
         candidates = adapter.list_candidates()
         batch = select_batch(candidates, {"notes": []}, max_total=args.max_total)
-        _safe_print(f"candidates={len(candidates)} selected={len(batch['selected'])} blocked_missing_pdf={len(batch['blocked_missing_pdf'])}")
+        _safe_print(
+            f"candidates={len(candidates)} selected={len(batch['selected'])} blocked_missing_pdf={len(batch['blocked_missing_pdf'])}"
+        )
         for entry in batch["selected"]:
             candidate = entry["candidate"]
-            _safe_print(f"SELECT {candidate.stage.value} {candidate.citekey} pdf={candidate.has_pdf} score={entry['score']} title={candidate.title}")
+            _safe_print(
+                f"SELECT {candidate.stage.value} {candidate.citekey} pdf={candidate.has_pdf} score={entry['score']} title={candidate.title}"
+            )
         for entry in batch["blocked_missing_pdf"]:
             candidate = entry["candidate"]
-            _safe_print(f"BLOCKED_MISSING_PDF {candidate.stage.value} {candidate.citekey} title={candidate.title}")
+            _safe_print(
+                f"BLOCKED_MISSING_PDF {candidate.stage.value} {candidate.citekey} title={candidate.title}"
+            )
         return 0
     if args.command == "scan-obsidian":
         try:
@@ -104,7 +127,9 @@ def main(argv: list[str] | None = None) -> int:
         except PipelineError as exc:
             print(f"scan-obsidian error: {exc}", file=sys.stderr)
             return 2
-        return obsidian_inventory_main(["--vault-root", str(vault_root), "--output", args.output])
+        return obsidian_inventory_main(
+            ["--vault-root", str(vault_root), "--output", args.output]
+        )
     if args.command == "scan-zotero":
         inventory_args = ["--output", args.output, "--papers-root", args.papers_root]
         if args.offline_fixture:
@@ -112,7 +137,9 @@ def main(argv: list[str] | None = None) -> int:
         return zotero_inventory_main(inventory_args)
     if args.command == "sync-registry":
         try:
-            report = sync_registry_from_jsonl(args.db, projects_path=args.projects, papers_path=args.papers)
+            report = sync_registry_from_jsonl(
+                args.db, projects_path=args.projects, papers_path=args.papers
+            )
         except PipelineError as exc:
             print(f"sync-registry error: {exc}", file=sys.stderr)
             return 2
@@ -134,7 +161,9 @@ def main(argv: list[str] | None = None) -> int:
                 papers_path=args.papers,
                 output_path=args.output,
                 include_states=_split_csv(args.include_states),
+                paper_stages=_split_stage_csv(args.paper_stages),
                 top_n=args.top_n,
+                max_candidates_total=args.max_candidates_total,
                 registry_db=args.registry_db,
             )
         except PipelineError as exc:
@@ -162,11 +191,30 @@ def main(argv: list[str] | None = None) -> int:
                 output_path=args.output,
                 client=LMStudioChatClient(config.lmstudio),
                 max_attempts=args.max_attempts,
+                paper_stages=_split_stage_csv(args.paper_stages),
+                max_candidates=args.max_candidates,
+                progress_callback=_report_classify_progress,
             )
         except PipelineError as exc:
             print(_classify_error_message(str(exc)), file=sys.stderr)
             return 2
         _safe_print(f"classifications={len(classifications)} output={args.output}")
+        return 0
+    if args.command == "export-review":
+        review_date = args.date or default_review_date()
+        review_id = args.review_id or default_review_id(review_date)
+        output_path = args.output or default_review_output_path(review_date)
+        try:
+            result = run_export_review_from_jsonl(
+                classifications_path=args.classifications,
+                output_path=output_path,
+                review_id=review_id,
+                review_date=review_date,
+            )
+        except PipelineError as exc:
+            print(f"export-review error: {exc}", file=sys.stderr)
+            return 2
+        _safe_print(f"review_items={result.review_items} output={result.output_path}")
         return 0
     if args.command == "pilot-run":
         return _run_cycle(args)
@@ -198,7 +246,9 @@ class _VaultCitekeySource:
     def list_candidates(self):
         candidates = self.source.list_candidates()
         for candidate in candidates:
-            resolved = resolve_citekey_from_vault(self.vault_root, doi=candidate.doi, title=candidate.title)
+            resolved = resolve_citekey_from_vault(
+                self.vault_root, doi=candidate.doi, title=candidate.title
+            )
             if resolved:
                 object.__setattr__(candidate, "citekey", resolved)
         return candidates
@@ -213,7 +263,9 @@ class _CitekeyFilteredSource:
         candidates = self.source.list_candidates()
         if not self.citekey:
             return candidates
-        return [candidate for candidate in candidates if candidate.citekey == self.citekey]
+        return [
+            candidate for candidate in candidates if candidate.citekey == self.citekey
+        ]
 
 
 def _run_cycle(args) -> int:
@@ -231,24 +283,33 @@ def _run_cycle(args) -> int:
             raise
         adapter = _NoopSource()
     source = _CitekeyFilteredSource(
-        _VaultCitekeySource(_StageFilteredSource(adapter, _stage_from_cli(args.stage)), config.paths.vault_root),
+        _VaultCitekeySource(
+            _StageFilteredSource(adapter, _stage_from_cli(args.stage)),
+            config.paths.vault_root,
+        ),
         getattr(args, "citekey", None),
     )
     lexical_index = build_lexical_index(config.paths.vault_root)
     if getattr(args, "dry_run", False):
         candidates = source.list_candidates()
         batch = select_batch(candidates, lexical_index, max_total=args.max_total)
-        _safe_print(f"dry-run candidates={len(candidates)} selected={len(batch['selected'])} blocked_missing_pdf={len(batch['blocked_missing_pdf'])}")
+        _safe_print(
+            f"dry-run candidates={len(candidates)} selected={len(batch['selected'])} blocked_missing_pdf={len(batch['blocked_missing_pdf'])}"
+        )
         for entry in batch["selected"]:
             candidate = entry["candidate"]
-            _safe_print(f"SELECT {candidate.stage.value} {candidate.citekey} pdf={candidate.has_pdf} score={entry['score']} title={candidate.title}")
+            _safe_print(
+                f"SELECT {candidate.stage.value} {candidate.citekey} pdf={candidate.has_pdf} score={entry['score']} title={candidate.title}"
+            )
         return 0
     analyzer = LocalPaperAnalyzer(
         client=LMStudioChatClient(config.lmstudio),
         max_attempts=args.max_attempts,
         packet_max_chars=args.packet_max_chars,
     )
-    operational = resolve_operational_collections(adapter, config.operational_collections)
+    operational = resolve_operational_collections(
+        adapter, config.operational_collections
+    )
     result = run_once(
         config=config,
         zotero_source=source,
@@ -264,7 +325,9 @@ def _run_cycle(args) -> int:
         f"blocked_missing_pdf={len(result.blocked_missing_pdf)} notes_written={len(result.notes_written)}"
     )
     for decision in result.applied_decisions:
-        _safe_print(f"APPLIED {decision['citekey']} status={decision['status']} errors={decision['errors']}")
+        _safe_print(
+            f"APPLIED {decision['citekey']} status={decision['status']} errors={decision['errors']}"
+        )
     for note in result.notes_written:
         _safe_print(f"NOTE {note}")
     return 0
@@ -306,8 +369,43 @@ def _safe_print(text: str) -> None:
     print(text)
 
 
+def _report_classify_progress(
+    completed: int, total: int, classification: dict[str, object]
+) -> None:
+    _safe_print(
+        "classified="
+        f"{completed}/{total} "
+        f"{classification.get('project_id')} -> {classification.get('citekey')}"
+    )
+
+
 def _split_csv(value: str):
     return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def _split_stage_csv(value: str | None):
+    if value is None:
+        return None
+    raw = _split_csv(value)
+    if not raw:
+        return None
+    aliases = {
+        "tolook": ".ToLook",
+        ".tolook": ".ToLook",
+        "look": ".ToLook",
+        "torevise": ".To Revise",
+        ".torevise": ".To Revise",
+        "revise": ".To Revise",
+        "todig": ".ToDig",
+        ".todig": ".ToDig",
+        "dig": ".ToDig",
+        "expendable": "Expendable",
+    }
+    normalized = []
+    for item in raw:
+        key = item.replace(" ", "").lower()
+        normalized.append(aliases.get(key, item))
+    return tuple(normalized)
 
 
 def _match_error_message(error: str) -> str:

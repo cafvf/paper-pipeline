@@ -130,11 +130,11 @@ Side effects: writes a review report to a configured output/inbox path only.
 
 Tests expected: grouping, escaping, stable ordering, parseable decision blocks.
 
-Current related files: `paper_pipeline/decision_notes.py`, `paper_pipeline/assessment_notes.py`.
+Current related files: `paper_pipeline/export_review.py`, `tests/test_export_review.py`.
 
-Future suggested files: `paper_pipeline/review_export.py`, `tests/test_review_export.py`.
+Future suggested files: review parser/apply modules only after grouped export is stable.
 
-Output artifact: `data/review.md`.
+Output artifact: `data/review-project-papers-YYYY-MM-DD.md`.
 
 Each YAML block must include `review_id`, `review_item_id`, one paper-level completion status, one Zotero-stage decision, and project-level decisions for each project-paper match. Allowed values should be shown in Markdown, not repeated as `allowed_*` YAML keys.
 

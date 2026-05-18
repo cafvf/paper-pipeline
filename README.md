@@ -19,17 +19,27 @@ ainda e executado por `paper-pipeline run` / `pilot-run` e por
 
 Ao mesmo tempo, a base do novo fluxo `projeto <-> artigo` ja existe em forma de
 comandos e modulos independentes: `scan-obsidian`, `scan-zotero`,
-`sync-registry`, `match`, `obsidian_inventory.py`, `zotero_inventory.py`,
-`registry.py`, `project_paper_matching.py` e
-`project_paper_classification.py`.
+`sync-registry`, `match`, `classify`, `export-review`,
+`obsidian_inventory.py`, `zotero_inventory.py`, `registry.py`,
+`project_paper_matching.py`, `project_paper_classification.py` e
+`export_review.py`.
 
 O estado atual, portanto, e de migracao controlada: o alvo continua sendo uma
 assistente local Obsidian + Zotero com orquestrador fino, artefatos explicitos
 e aprovacao humana obrigatoria antes de qualquer escrita em Zotero ou notas
-permanentes do Obsidian. O gap imediato para fechar o MVP de leitura/triagem e
-completar a cadeia read-only:
+permanentes do Obsidian. A cadeia read-only do MVP ja existe como comandos
+independentes:
 
 `scan-obsidian -> scan-zotero -> match -> classify -> export-review`
+
+O gap imediato agora e transformar essa cadeia em um **orquestrador noturno
+por camadas** que:
+
+- processe no maximo 10 artigos por execucao;
+- distribua o orcamento entre `.ToLook`, `.To Revise` e `.ToDig`;
+- pule artigos ja avaliados na camada atual;
+- preserve a regra de que cada camada adiciona mais profundidade analitica do
+  que a anterior.
 
 ## Quickstart
 
@@ -84,6 +94,7 @@ Mapa rapido:
 - `docs/modules.md`: responsabilidades, entradas, saidas e efeitos colaterais.
 - `docs/roadmap.md`: status dos projetos/modulos planejados.
 - `docs/development_plan.md`: ordem atual de implementacao para fechar o MVP read-only.
+- `docs/next_session_prompt.md`: prompt reutilizavel para continuar o desenvolvimento na proxima sessao.
 - `docs/development_guidelines.md`: diretrizes de engenharia, TDD/XP/Clean Code/Spec-Driven e politica obrigatoria de testes.
 - `docs/data_contracts.md`: contratos esperados para projeto, artigo, matching,
   classificacao, revisao humana e runs.

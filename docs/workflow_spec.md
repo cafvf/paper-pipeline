@@ -202,6 +202,12 @@ Keyword sources:
 
 Side effects: writes only the local output file.
 
+Operational filters:
+
+- `--top-n`: cap candidates per project;
+- `--max-candidates-total`: cap candidates across the whole run;
+- `--paper-stages`: restrict candidate generation to papers currently in selected Zotero reading stages such as `.ToLook`, `.To Revise`, or `.ToDig`.
+
 Independent MVP: fixture projects/papers in, deterministic top-N candidates out.
 
 ### `classify`
@@ -216,13 +222,18 @@ Default input layer: metadata only.
 
 Side effects: local LLM call and local output write. No Zotero or Obsidian writes.
 
+Operational filters:
+
+- `--max-candidates`: safety cap on how many candidate rows are sent to the LLM from the current candidate file;
+- `--paper-stages`: restrict the current classification run to candidates whose paper currently belongs to selected Zotero reading stages in `data/papers.jsonl`.
+
 Independent MVP: fake LLM or recorded local response in, validated classifications out.
 
 ### `export-review`
 
 Input: `data/classifications.jsonl`.
 
-Output: `data/review.md`.
+Output: `data/review-project-papers-YYYY-MM-DD.md`.
 
 Role: create one Markdown review file per round. This remains true for MVP and final design.
 
@@ -242,9 +253,9 @@ Side effects: writes only the review Markdown file.
 
 Independent MVP: fixture classifications in, parseable Markdown with YAML decision blocks out.
 
-Human-decision Markdown files intended for Obsidian should be written to the single configured inbox path from `.env` or environment/configuration, not hardcoded local paths. `VAULT_ROOT` should be absolute, and `OBSIDIAN_HUMAN_REVIEW_INBOX_DIR` may be absolute or relative to `VAULT_ROOT`.
+Current MVP implementation writes review Markdown locally by default using stable filenames under `data/`. A later phase may add an explicit export mode or orchestrator policy that copies those review artifacts into the configured Obsidian inbox. `VAULT_ROOT` should be absolute, and `OBSIDIAN_HUMAN_REVIEW_INBOX_DIR` remains the intended future destination for human-review files once the inbox handoff phase is implemented.
 
-Review Markdown files and any supporting copied images should be placed directly in that inbox, without per-paper subfolders. Generated paper-note drafts also go to this inbox; the user manually moves them to the final Obsidian location.
+Review Markdown files and any supporting copied images should eventually be placeable directly in that inbox, without per-paper subfolders. Generated paper-note drafts also go to that inbox in later phases; the user manually moves them to the final Obsidian location.
 
 Supporting image filenames copied to the inbox should be citekey-prefixed, for example `{citekey}-eq-001.png`, to avoid collisions in the flat inbox.
 
@@ -258,7 +269,7 @@ These generated review files and paper-note drafts do not require frontmatter.
 
 ### `parse-review`
 
-Input: `data/review.md`.
+Input: `data/review-project-papers-YYYY-MM-DD.md`.
 
 Output: `data/human_reviews.jsonl`.
 
@@ -345,11 +356,27 @@ Independent MVP: fixture portfolio in, stable Markdown audit out.
 
 Input: config and scheduling policy.
 
-Outputs: outputs from the commands it invokes.
+Outputs: outputs from the commands it invokes plus optional run/progress metadata.
 
 Role: orchestrate safe triage by sequencing independent modules. It must not contain matching, classification, Zotero, or Obsidian business logic.
 
-Default sequence:
+Planned nightly policy:
+
+```text
+nightly triage
+  -> budget: max 10 papers total
+  -> layers: .ToLook, .To Revise, .ToDig
+  -> skip papers already evaluated in their current layer
+  -> each layer uses its own analysis depth
+```
+
+Current stage contracts for that orchestrator:
+
+- `.ToLook`: metadata-only triage;
+- `.To Revise`: deeper structured review using richer extracted products once they exist;
+- `.ToDig`: deepest technical/formulation/implementation review once richer products exist.
+
+Current runnable sequence owned by independent commands:
 
 ```text
 scan-obsidian
@@ -358,6 +385,13 @@ match
 classify
 export-review
 ```
+
+Selection rules that belong to the orchestrator layer rather than the business-logic commands:
+
+- enforce one global nightly budget;
+- divide that budget across configured Zotero reading stages;
+- skip papers already evaluated in their current stage/layer;
+- stop cleanly when the nightly budget or deadline is reached.
 
 Side effects: only those of the invoked commands. The default triage sequence does not write Zotero and does not create permanent Obsidian notes.
 
@@ -448,6 +482,8 @@ Automatic runs should only use already extracted `Expendable` products. They sho
 
 The reading protocol/gates in `docs/reading_protocol_criteria.md` are secondary evidence for `recommended_zotero_stage`, while project utility remains evaluated project by project.
 
+Phase 1 metadata-only classification must still reject semantically incoherent combinations. In particular, useful/approved-looking classifications must not recommend `Expendable`, `extract_equations`/`reproduce_code` require `.ToDig`, and the classifier must not demote papers already in `.To Revise` or `.ToDig`.
+
 Stage tags beginning with `@` must stay coherent with the final Zotero stage decision. `$` tags indicate concrete uses the paper brings, such as background citation, method citation, discussion value, extension value, or paper-specific use.
 
 ## LLM Input Layers
@@ -477,17 +513,29 @@ scan_obsidian:
   frequency: nightly
 scan_zotero:
   frequency: nightly
-extract_paper_products:
-  frequency: nightly_for_metadata_and_overview
-  max_items_per_run: 100
-mine_review_references:
-  frequency: nightly_for_revise_and_dig
-  max_items_per_run: 100
-match:
+triage:
   frequency: nightly
+  max_papers_total: 10
+  layers:
+    - stage: .ToLook
+      target_items: 4
+      input_layer: metadata
+      only_if_not_evaluated_in_current_layer: true
+    - stage: .To Revise
+      target_items: 3
+      input_layer: sections_or_best_available_products
+      only_if_not_evaluated_in_current_layer: true
+    - stage: .ToDig
+      target_items: 3
+      input_layer: technical_or_best_available_products
+      only_if_not_evaluated_in_current_layer: true
+match:
+  frequency: nightly_or_on_inventory_change
+  supports_stage_filters: true
 classify:
-  frequency: nightly_if_candidates_changed
-  max_items_per_run: 50
+  frequency: nightly_for_selected_candidates
+  supports_stage_filters: true
+  supports_max_candidates: true
 extract_paper_products_deeper_layers:
   frequency: approved_or_selected_only
   max_items_per_run: 10

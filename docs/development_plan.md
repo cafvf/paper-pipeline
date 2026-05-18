@@ -2,32 +2,33 @@
 
 This plan is the next-session implementation handoff. It has been revised after code review so the team addresses the real blockers first, not the longer-horizon modules.
 
-The repository already has a useful safe base for the project-paper workflow, but it is not yet an end-to-end MVP 0.1 implementation. The immediate goal is to complete the read-only triage chain:
+The repository already has a useful safe base for the project-paper workflow, and the read-only chain now exists as independent commands:
 
 `scan-obsidian -> scan-zotero -> match -> classify -> export-review`
 
-No new PDF/deep-analysis/note-generation work should start before that chain exists, is tested, and is clearly separated from the legacy paper-stage runner.
+The immediate goal is no longer to finish that chain. The immediate goal is to harden it and then wrap it in the planned thin nightly orchestrator. No new PDF/deep-analysis/note-generation work should start before the orchestrator boundary, registry write-through, and per-layer evaluation rules are explicit and tested.
 
 ## Current Status Snapshot
 
 Validated on the current branch:
 
 - `uv run ruff check` passes;
-- `uv run pytest -q -o addopts=` passes (`251 passed` during review);
-- foundational project-paper contracts and modules exist for:
-  - project profiles;
-  - paper profiles;
-  - project-paper lexical matching;
-  - classification schema parsing/validation;
-  - registry schema and basic sync.
+- `uv run pytest -q -o addopts=` passes (`291 passed` during the latest verification loop);
+- the independent project-paper chain exists for:
+  - project profiles (`scan-obsidian`);
+  - paper profiles (`scan-zotero`);
+  - lexical project-paper matching (`match`);
+  - metadata-only classification with semantic coherence checks (`classify`);
+  - grouped paper-level review export (`export-review`).
 
 Known gaps from review:
 
-1. there is no grouped `export-review` implementation;
-2. the legacy `runner.py` still owns paper-stage orchestration and should not be reused as the new project-paper orchestrator;
-3. registry skip logic exists, but candidate/classification/hash write-through is not yet wired into the runtime flow;
-4. legacy approval paths can still lead to direct Zotero writes without the future `plan_hash`-verified apply contract;
-5. local security audit currently fails if `.env` with real secrets remains under the repo root.
+1. the legacy `runner.py` still owns paper-stage orchestration and should not be reused as the new project-paper orchestrator;
+2. registry skip logic exists, but candidate/classification/review/hash write-through is not yet wired into the runtime flow;
+3. the new thin `triage` orchestrator does not exist yet;
+4. the repository still lacks per-layer evaluation tracking, so nightly runs cannot yet skip papers already evaluated in their current Zotero layer;
+5. legacy approval paths can still lead to direct Zotero writes without the future `plan_hash`-verified apply contract;
+6. local security audit currently fails if `.env` with real secrets remains under the repo root.
 
 ## Engineering Guardrails
 
@@ -50,7 +51,7 @@ Before changing behavior in the next session:
 2. do not extend legacy `run` / `pilot-run` to simulate the new project-paper MVP;
 3. keep all new project-paper work behind independent commands and artifacts;
 4. keep Zotero and permanent Obsidian writes out of the new default triage flow;
-5. if a task depends on `classify` or grouped human review, finish those first instead of jumping ahead to PDF or note work.
+5. if a task depends on the nightly orchestrator, keep the orchestrator sequencing-only and push domain logic back down into independent commands.
 
 ## Implemented Or Mostly Implemented Foundations
 
@@ -196,6 +197,10 @@ Mitigation:
 
 ## Cycle 3: Grouped Review Export MVP
 
+Status:
+
+Implemented on the current branch as the current review surface. Preserve its grouped citekey-level contract while the orchestrator phase lands.
+
 Purpose:
 
 Close the human-review gap so the read-only MVP can reach its required output.
@@ -259,11 +264,11 @@ Mitigation:
 
 - prefer one explicit post-success write boundary per command.
 
-## Cycle 5: Triage Command Skeleton
+## Cycle 5: Thin Nightly Orchestrator
 
 Purpose:
 
-Create the thin new orchestrator only after `classify` and `export-review` exist.
+Create the new thin orchestrator now that `classify` and `export-review` exist as independent commands.
 
 Tasks:
 
@@ -275,22 +280,29 @@ Tasks:
   - `classify`;
   - `export-review`;
 - keep orchestration free of business logic;
-- add budget/error handling around command sequencing only;
+- enforce one nightly global budget of at most 10 papers total;
+- divide that budget across `.ToLook`, `.To Revise`, and `.ToDig` with configurable per-layer targets and rollover when one layer has fewer pending papers;
+- skip papers already evaluated in their current layer;
+- make the orchestrator responsible only for sequencing, budget control, deadline control, and per-layer selection policy;
 - do not move legacy `run` behavior under this new command.
 
 Acceptance:
 
 - one command can execute the read-only project-paper MVP path end to end;
-- no matching/classification/review business rules are reimplemented in the orchestrator;
+- the orchestrator enforces a global nightly paper budget instead of unconstrained batch size;
+- the orchestrator can target `.ToLook`, `.To Revise`, and `.ToDig` separately without reimplementing matching/classification/review rules;
+- papers already evaluated in their current layer are skipped by policy;
 - the default triage run does not write Zotero or permanent Obsidian notes.
 
 Risks:
 
-- reintroducing monolithic orchestration.
+- reintroducing monolithic orchestration;
+- burying per-layer state rules inside the wrong module.
 
 Mitigation:
 
-- fail code review if domain logic starts moving into the new command.
+- fail code review if domain logic starts moving into the new command;
+- keep layer-completion tracking explicit in registry/run artifacts instead of implicit in the orchestrator.
 
 ## Phase 2: Safety Hardening Before Any Apply Work
 
@@ -446,20 +458,17 @@ Acceptance:
 - raw PDF fallback is rejected unless explicitly enabled;
 - output is written to `papers/{citekey}/deep_analysis.json`.
 
-## Cycle 10: Long-Horizon Orchestrator And Scheduling
+## Cycle 10: Long-Horizon Orchestrator Hardening
 
-This is later work, not the next-session target.
+This is later work, after the first nightly orchestrator exists.
 
 Tasks:
 
-- sequence independent commands;
-- support nightly scheduling policy;
-- enforce max runtime and max item budgets;
-- stop before starting new work when either budget is reached;
+- refine per-layer rollover and priority policy after real nightly runs;
+- support max runtime and wall-clock deadlines such as `06:00`;
 - finish the currently running item/task before stopping;
-- support a wall-clock deadline such as `06:00`;
-- defer task-specific timeout defaults to each independent project;
-- persist progress and resume next run.
+- persist progress and resume next run;
+- support richer layer-specific analyzers once `.To Revise` and `.ToDig` products exist.
 
 Acceptance:
 

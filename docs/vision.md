@@ -65,6 +65,13 @@ The first project-specific MVP should be "triage without writing":
 - read 3 to 5 project notes from a safe Obsidian fixture or explicit vault path;
 - read metadata for 100 to 300 Zotero items through a mockable adapter/export;
 - generate candidates by lexical or embedding similarity;
-- classify top 10 papers per project using title, abstract, tags, and collections;
+- classify bounded metadata-only candidates using title, abstract, tags, and collections;
 - export a Markdown review report;
 - avoid Zotero writes, permanent Obsidian notes, and full PDF analysis.
+
+The immediate post-MVP target is a **nightly layer-aware orchestrator**:
+
+- one nightly budget of at most 10 papers total;
+- budget divided across `.ToLook`, `.To Revise`, and `.ToDig`;
+- only papers not yet evaluated in their current layer are selected;
+- each later layer adds deeper evidence and stricter criteria than the previous one.
