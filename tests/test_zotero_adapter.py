@@ -1,13 +1,31 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 
 import pytest
 
+from paper_triage.audit import AuditLedger
 from paper_triage.errors import TriageError
-from paper_triage.release_safety import ReleaseAuthorization
+from paper_triage.plans import (
+    ApplyRequest,
+    ApprovalEvidence,
+    PlannedItem,
+    PlannedOperation,
+    PreviewPlan,
+    PreviewVersion,
+    Snapshot,
+    canonical_sha256,
+)
+from paper_triage.release_safety import (
+    ReleaseAuthorization,
+    ReleaseMode,
+    ReleaseRequest,
+    ValidationEvidence,
+    authorize,
+)
 from paper_triage.zotero import (
     DryRunBatch,
     FakeZoteroPort,
@@ -251,26 +269,86 @@ class InMemoryZoteroHttp:
         return (204, "write-1")
 
 
-def _live_authorization() -> ReleaseAuthorization:
-    return ReleaseAuthorization(
-        allowed=True,
-        reason="test-only release authorization",
-        plan_hash="a" * 64,
-        approval_confirmation_digest="b" * 64,
-        validation_digest="c" * 64,
+def _release_artifacts(
+    *, resource: str = "tag"
+) -> tuple[PreviewPlan, ApplyRequest, ValidationEvidence]:
+    target = "#managed" if resource == "tag" else "STAGEKEY"
+    items = tuple(
+        PlannedItem(
+            item_key=f"ITEM{number:02d}",
+            source_fingerprint="a" * 64,
+            preview_item_version=1,
+            classification_projection={},
+            operations=(
+                PlannedOperation.build(
+                    sequence=0,
+                    resource_type=resource,
+                    action="add",
+                    target=target,
+                    before_present=False,
+                    after_present=True,
+                    version_precondition=PreviewVersion(version=1),
+                    reason_codes=(f"test-{number}",),
+                ),
+            ),
+        )
+        for number in range(10)
+    )
+    snapshot = Snapshot(value={}, digest=canonical_sha256({}))
+    payload = {
+        "preview_id": f"{resource}-preview",
+        "created_at": datetime(2026, 8, 11, tzinfo=UTC),
+        "run_date": date(2026, 8, 11),
+        "selected_item_keys": tuple(item.item_key for item in items),
+        "library_scope": {},
+        "config_snapshot": snapshot,
+        "collection_snapshot": snapshot,
+        "project_profile_snapshot": snapshot,
+        "ruleset_snapshot": snapshot,
+        "taxonomy_snapshot": snapshot,
+        "items": items,
+        "reviewed_diff_projection": PreviewPlan.reviewed_diff_for(items),
+    }
+    preview = PreviewPlan(**payload, plan_hash=PreviewPlan.plan_hash_for(**payload))
+    operation_ids = tuple(operation.operation_id for item in items for operation in item.operations)
+    request = ApplyRequest(
+        preview_id=preview.preview_id,
+        plan_hash=preview.plan_hash,
+        approval=ApprovalEvidence.create(
+            approval_id=f"{resource}-approval",
+            approved_plan_hash=preview.plan_hash,
+            approved_at=datetime(2026, 8, 11, tzinfo=UTC),
+            approved_item_keys=preview.selected_item_keys,
+            reviewed_operation_ids=operation_ids,
+            reviewed_diff_hash=preview.reviewed_diff_hash,
+        ),
+    )
+    validation_evidence = ValidationEvidence.create(plan_hash=preview.plan_hash, checks=("pytest",))
+    return preview, request, validation_evidence
+
+
+def _live_authorization(*, resource: str = "tag") -> ReleaseAuthorization:
+    preview, request, validation_evidence = _release_artifacts(resource=resource)
+    return authorize(
+        ReleaseRequest(
+            mode=ReleaseMode.LIVE,
+            human_approved=True,
+            preview_plan=preview,
+            apply_request=request,
+            validation_evidence=validation_evidence,
+        )
     )
 
 
-def _managed_adapter(fake: InMemoryZoteroHttp, **kwargs: object) -> ZoteroHttpMutationAdapter:
+def _managed_adapter(
+    fake: InMemoryZoteroHttp, *, resource: str = "tag"
+) -> ZoteroHttpMutationAdapter:
     return ZoteroHttpMutationAdapter(
         ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
-        _live_authorization(),
+        _live_authorization(resource=resource),
         transport=fake.read,
         write_transport=fake.write,
-        allowed_tag_targets=frozenset({"#managed"}),
-        **kwargs,
     )
-
 
 def test_managed_http_mutation_requires_authorization_and_verifies_exact_diff() -> None:
     fake = InMemoryZoteroHttp(_item("ITEM0001", tags=["#human"], collections=["LOOKKEY"]))
@@ -403,7 +481,7 @@ def test_managed_http_mutation_rejects_canonical_tag_outside_snapshot_allowlist(
 
 def test_managed_http_mutation_collection_target_must_be_from_snapshot_allowlist() -> None:
     fake = InMemoryZoteroHttp(_item("ITEM0001", collections=[]))
-    adapter = _managed_adapter(fake, allowed_collection_keys=frozenset({"STAGEKEY"}))
+    adapter = _managed_adapter(fake, resource="collection")
     command = ZoteroMutationCommand(
         operation_id="collection-1", idempotency_key="collection-id", item_key="ITEM0001",
         expected_version=1, resource="collection", action="add", target="OTHERKEY",
@@ -412,3 +490,79 @@ def test_managed_http_mutation_collection_target_must_be_from_snapshot_allowlist
     with pytest.raises(PermissionError, match="snapshot allowlist"):
         adapter.mutate_item(command)
     assert fake.writes == []
+
+
+def test_mutation_adapter_rejects_serialized_or_hand_built_capabilities() -> None:
+    fake = InMemoryZoteroHttp(_item("ITEM0001"))
+    issued = _live_authorization()
+    forged = ReleaseAuthorization.model_validate(issued.model_dump())
+
+    with pytest.raises(PermissionError, match="issued, snapshot-bound"):
+        ZoteroHttpMutationAdapter(
+            ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
+            forged,
+            transport=fake.read,
+            write_transport=fake.write,
+        )
+    assert fake.writes == []
+
+
+def test_persisted_release_factory_binds_adapter_to_ledger_snapshot(tmp_path: Path) -> None:
+    fake = InMemoryZoteroHttp(_item("ITEM0001", tags=["#human"]))
+    preview, request, validation_evidence = _release_artifacts()
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_preview_request(preview, request)
+
+    adapter = ZoteroHttpMutationAdapter.from_persisted_release(
+        ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
+        ledger,
+        preview.plan_hash,
+        human_approved=True,
+        validation_evidence=validation_evidence,
+        transport=fake.read,
+        write_transport=fake.write,
+    )
+    receipt = adapter.mutate_item(
+        ZoteroMutationCommand(
+            operation_id="persisted-op",
+            idempotency_key="persisted-key",
+            item_key="ITEM0001",
+            expected_version=1,
+            resource="tag",
+            action="add",
+            target="#managed",
+            expected_present=False,
+            desired_present=True,
+        )
+    )
+
+    assert receipt.accepted_version == 2
+    assert fake.writes
+
+
+def test_persisted_release_factory_fails_closed_for_missing_plan(tmp_path: Path) -> None:
+    preview, _request, validation_evidence = _release_artifacts()
+
+    with pytest.raises(ValueError, match="not persisted"):
+        ZoteroHttpMutationAdapter.from_persisted_release(
+            ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
+            AuditLedger(tmp_path / "audit.sqlite3"),
+            preview.plan_hash,
+            human_approved=True,
+            validation_evidence=validation_evidence,
+        )
+
+
+def test_persisted_release_factory_requires_explicit_human_approval(tmp_path: Path) -> None:
+    preview, request, validation_evidence = _release_artifacts()
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_preview_request(preview, request)
+
+    with pytest.raises(PermissionError, match="issued, snapshot-bound"):
+        ZoteroHttpMutationAdapter.from_persisted_release(
+            ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
+            ledger,
+            preview.plan_hash,
+            human_approved=False,
+            validation_evidence=validation_evidence,
+        )

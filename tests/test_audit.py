@@ -55,8 +55,24 @@ def plan() -> MutationPlan:
 def _batch_preview() -> tuple[PreviewPlan, ApplyRequest]:
     items = []
     for number in range(10):
-        operation = PlannedOperation.build(sequence=0, resource_type="tag", action="add", target=f"#topic-{number}", before_present=False, after_present=True, version_precondition=PreviewVersion(version=1))
-        items.append(PlannedItem(item_key=f"ITEM{number:02d}", source_fingerprint="a" * 64, preview_item_version=1, classification_projection={}, operations=(operation,)))
+        operation = PlannedOperation.build(
+            sequence=0,
+            resource_type="tag",
+            action="add",
+            target=f"#topic-{number}",
+            before_present=False,
+            after_present=True,
+            version_precondition=PreviewVersion(version=1),
+        )
+        items.append(
+            PlannedItem(
+                item_key=f"ITEM{number:02d}",
+                source_fingerprint="a" * 64,
+                preview_item_version=1,
+                classification_projection={},
+                operations=(operation,),
+            )
+        )
     frozen_items = tuple(items)
     snapshot = Snapshot(value={}, digest=canonical_sha256({}))
     payload = {
@@ -74,9 +90,20 @@ def _batch_preview() -> tuple[PreviewPlan, ApplyRequest]:
         "reviewed_diff_projection": PreviewPlan.reviewed_diff_for(frozen_items),
     }
     preview = PreviewPlan(**payload, plan_hash=PreviewPlan.plan_hash_for(**payload))
-    operation_ids = tuple(operation.operation_id for item in preview.items for operation in item.operations)
-    evidence = ApprovalEvidence.create(approval_id="batch-approval", approved_plan_hash=preview.plan_hash, approved_at=datetime(2026, 1, 1, tzinfo=UTC), approved_item_keys=preview.selected_item_keys, reviewed_operation_ids=operation_ids, reviewed_diff_hash=preview.reviewed_diff_hash)
-    return preview, ApplyRequest(preview_id=preview.preview_id, plan_hash=preview.plan_hash, approval=evidence)
+    operation_ids = tuple(
+        operation.operation_id for item in preview.items for operation in item.operations
+    )
+    evidence = ApprovalEvidence.create(
+        approval_id="batch-approval",
+        approved_plan_hash=preview.plan_hash,
+        approved_at=datetime(2026, 1, 1, tzinfo=UTC),
+        approved_item_keys=preview.selected_item_keys,
+        reviewed_operation_ids=operation_ids,
+        reviewed_diff_hash=preview.reviewed_diff_hash,
+    )
+    return preview, ApplyRequest(
+        preview_id=preview.preview_id, plan_hash=preview.plan_hash, approval=evidence
+    )
 
 
 def test_canonical_ten_item_preview_is_persisted_and_revalidated(tmp_path: Path) -> None:
@@ -164,7 +191,9 @@ def test_reviewed_diff_hash_is_a_complete_ordered_golden_projection() -> None:
     independently_hashed = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
     assert canonical_reviewed_diff_hash(mutation_plan) == independently_hashed
-    assert independently_hashed == "5e0b555710d869f608303b6f2b43b106bf6c2099645db5efb03f2879ea804b7f"
+    assert (
+        independently_hashed == "5e0b555710d869f608303b6f2b43b106bf6c2099645db5efb03f2879ea804b7f"
+    )
     assert authorization(mutation_plan).reviewed_diff_hash == independently_hashed
 
 
@@ -268,8 +297,12 @@ def test_attempt_evidence_is_durable_before_attempt_and_only_verified_adds_estab
     operation_id = mutation_plan.operation_ids[0]
     ledger.record_operation(approved.authorization_id, operation_id, "planned", expected_version=7)
     evidence = AttemptEvidence(
-        operation_id=operation_id, idempotency_key="b" * 64, item_key=mutation_plan.item_key,
-        item_version=7, tags=("#human",), collection_keys=("LOOKKEY",),
+        operation_id=operation_id,
+        idempotency_key="b" * 64,
+        item_key=mutation_plan.item_key,
+        item_version=7,
+        tags=("#human",),
+        collection_keys=("LOOKKEY",),
         preserved_field_hashes={"metadata": "c" * 64},
     )
     ledger.record_attempt(approved.authorization_id, evidence)
@@ -278,15 +311,25 @@ def test_attempt_evidence_is_durable_before_attempt_and_only_verified_adds_estab
     with pytest.raises(ValueError, match="planned"):
         ledger.record_attempt(approved.authorization_id, evidence)
 
-    ledger.record_operation(approved.authorization_id, operation_id, "verified", 7, observed_version=8)
+    ledger.record_operation(
+        approved.authorization_id, operation_id, "verified", 7, observed_version=8
+    )
     ledger.record_managed_provenance(
         approved.authorization_id, evidence, resource="tag", target="#managed", verified_version=8
     )
     assert ledger.managed_removal_is_authorized(
-        operation_id, item_key=mutation_plan.item_key, resource="tag", target="#managed", expected_version=8
+        operation_id,
+        item_key=mutation_plan.item_key,
+        resource="tag",
+        target="#managed",
+        expected_version=8,
     )
     assert not ledger.managed_removal_is_authorized(
-        operation_id, item_key=mutation_plan.item_key, resource="tag", target="#managed", expected_version=9
+        operation_id,
+        item_key=mutation_plan.item_key,
+        resource="tag",
+        target="#managed",
+        expected_version=9,
     )
 
 
@@ -340,6 +383,25 @@ class ScriptedVersionedPort(VersionedMutationPort):
 
     def read_version(self, mutation_plan: MutationPlan) -> int:
         return self.initial_version
+
+    def read_attempt_evidence(
+        self,
+        mutation_plan: MutationPlan,
+        mutation: Mutation,
+        *,
+        expected_version: int,
+        operation_id: str,
+    ) -> AttemptEvidence:
+        del mutation
+        return AttemptEvidence(
+            operation_id=operation_id,
+            idempotency_key=hashlib.sha256(operation_id.encode()).hexdigest(),
+            item_key=mutation_plan.item_key,
+            item_version=expected_version,
+            tags=(),
+            collection_keys=(),
+            preserved_field_hashes={"source": mutation_plan.source_fingerprint},
+        )
 
     def apply_operation(self, mutation: Mutation, *, expected_version: int, operation_id: str):  # type: ignore[no-untyped-def]
         self.calls.append((operation_id, expected_version))
@@ -447,6 +509,7 @@ def test_restart_recovery_uses_exact_persisted_authorization_and_no_port(tmp_pat
         "verified": 0,
         "skipped_stale": 1,
         "aborted": 1,
+        "uncertain": 0,
     }
     with pytest.raises(ValueError, match="exact persisted"):
         restarted_ledger.recover_authorized_plan(
@@ -474,6 +537,7 @@ def test_lost_response_reapply_uses_readback_never_replays_or_synthesizes_verifi
     assert [entry.state for entry in ledger.operation_entries_for(approved.authorization_id)] == [
         "planned",
         "attempted",
+        "uncertain",
     ]
 
     readback_port = ScriptedVersionedPort(initial_version=7, next_versions=[])
@@ -489,6 +553,7 @@ def test_lost_response_reapply_uses_readback_never_replays_or_synthesizes_verifi
     assert [entry.state for entry in result.entries] == [
         "planned",
         "attempted",
+        "uncertain",
         "verified",
         "aborted",
     ]
@@ -530,6 +595,7 @@ def test_lost_response_reapply_never_verifies_by_replay_alone(tmp_path: Path) ->
     assert [entry.state for entry in ledger.operation_entries_for(approved.authorization_id)] == [
         "planned",
         "attempted",
+        "uncertain",
     ]
 
     replay_port = ScriptedVersionedPort(initial_version=7, next_versions=[8, 9])
@@ -557,6 +623,163 @@ def test_restart_recovery_marks_attempted_only_operation_uncertain(tmp_path: Pat
 
     report = AuditLedger(database).recover_authorized_plan(approved, mutation_plan)
 
-    assert report.state == "aborted"
-    assert report.counts["attempted"] == 1
+    assert report.state == "uncertain"
+    assert report.counts["uncertain"] == 1
     assert report.counts["verified"] == 0
+
+
+def test_write_ahead_evidence_is_committed_before_a_versioned_mutation(tmp_path: Path) -> None:
+    mutation_plan = plan().model_copy(update={"source_version": 7})
+    approved = authorization(mutation_plan)
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+
+    class EvidenceCheckingPort(ScriptedVersionedPort):
+        def apply_operation(self, mutation: Mutation, *, expected_version: int, operation_id: str):  # type: ignore[no-untyped-def]
+            evidence = ledger.attempt_evidence_for(approved.authorization_id, operation_id)
+            assert evidence is not None
+            assert evidence.item_version == expected_version
+            return super().apply_operation(
+                mutation, expected_version=expected_version, operation_id=operation_id
+            )
+
+    result = apply_versioned_plan(mutation_plan, approved, EvidenceCheckingPort(7, [8, 9]), ledger)
+
+    assert result.terminal_state == "verified"
+    assert [entry.state for entry in result.entries] == [
+        "planned",
+        "attempted",
+        "verified",
+        "planned",
+        "attempted",
+        "verified",
+    ]
+
+
+def test_write_ahead_persistence_failure_prevents_mutation_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mutation_plan = plan().model_copy(update={"source_version": 7})
+    approved = authorization(mutation_plan)
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    port = ScriptedVersionedPort(7, [8, 9])
+
+    def fail_write_ahead(*_: object) -> None:
+        raise sqlite3.OperationalError("write-ahead unavailable")
+
+    monkeypatch.setattr(ledger, "record_attempt", fail_write_ahead)
+    with pytest.raises(sqlite3.OperationalError, match="write-ahead unavailable"):
+        apply_versioned_plan(mutation_plan, approved, port, ledger)
+
+    assert port.calls == []
+
+
+def test_ledger_derived_managed_provenance_cannot_be_forged(tmp_path: Path) -> None:
+    mutation_plan = plan()
+    approved = authorization(mutation_plan)
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_authorization_and_plan(approved, mutation_plan)
+    operation_id = mutation_plan.operation_ids[0]
+    evidence = AttemptEvidence(
+        operation_id=operation_id,
+        idempotency_key="b" * 64,
+        item_key=mutation_plan.item_key,
+        item_version=7,
+        tags=(),
+        collection_keys=(),
+        preserved_field_hashes={"metadata": "c" * 64},
+    )
+    ledger.record_operation(approved.authorization_id, operation_id, "planned", 7)
+    ledger.record_attempt(approved.authorization_id, evidence)
+    ledger.record_operation(approved.authorization_id, operation_id, "verified", 7, 8)
+    ledger.record_managed_provenance(
+        approved.authorization_id, evidence, resource="tag", target="#managed", verified_version=8
+    )
+
+    provenance = ledger.managed_provenance_for(
+        operation_id,
+        item_key=mutation_plan.item_key,
+        resource="tag",
+        target="#managed",
+        expected_version=8,
+    )
+    assert provenance is not None
+    assert provenance.authorization_id == approved.authorization_id
+    assert (
+        ledger.managed_provenance_for(
+            operation_id,
+            item_key=mutation_plan.item_key,
+            resource="tag",
+            target="#forged",
+            expected_version=8,
+        )
+        is None
+    )
+
+
+def test_existing_ledger_is_migrated_to_represent_uncertain_outcomes(tmp_path: Path) -> None:
+    database = tmp_path / "audit.sqlite3"
+    connection = sqlite3.connect(database)
+    connection.execute(
+        "CREATE TABLE operation_ledger "
+        "(sequence INTEGER PRIMARY KEY, authorization_id TEXT NOT NULL, operation_id TEXT NOT NULL, "
+        "state TEXT NOT NULL CHECK(state IN "
+        "('planned', 'attempted', 'verified', 'skipped_stale', 'aborted')), "
+        "expected_version INTEGER NOT NULL, observed_version INTEGER, "
+        "UNIQUE(authorization_id, operation_id, state))"
+    )
+    connection.commit()
+    connection.close()
+
+    ledger = AuditLedger(database)
+
+    schema = ledger.connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'operation_ledger'"
+    ).fetchone()[0]
+    assert "'uncertain'" in schema
+
+
+def test_persist_preview_authorization_is_idempotent_and_binds_all_batch_operations(
+    tmp_path: Path,
+) -> None:
+    preview, request = _batch_preview()
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_preview_request(preview, request)
+
+    authorization_id = ledger.persist_preview_authorization(preview.plan_hash)
+
+    assert authorization_id == request.approval.approval_id
+    assert ledger.persist_preview_authorization(preview.plan_hash) == authorization_id
+    row = ledger.connection.execute(
+        "SELECT plan_hash, reviewed_diff_hash, approved_item_keys_json, approved_operation_ids_json, "
+        "confirmation_digest FROM apply_authorization WHERE authorization_id = ?",
+        (authorization_id,),
+    ).fetchone()
+    assert row == (
+        preview.plan_hash,
+        preview.reviewed_diff_hash,
+        json.dumps(preview.selected_item_keys, separators=(",", ":")),
+        json.dumps(
+            tuple(
+                operation.operation_id for item in preview.items for operation in item.operations
+            ),
+            separators=(",", ":"),
+        ),
+        request.approval.confirmation_digest,
+    )
+
+    item = preview.items[0]
+    operation = item.operations[0]
+    evidence = AttemptEvidence(
+        operation_id=operation.operation_id,
+        idempotency_key="d" * 64,
+        item_key=item.item_key,
+        item_version=item.preview_item_version,
+        tags=(),
+        collection_keys=(),
+        preserved_field_hashes={"source": item.source_fingerprint},
+    )
+    ledger.record_operation(
+        authorization_id, operation.operation_id, "planned", item.preview_item_version
+    )
+    ledger.record_attempt(authorization_id, evidence)
+    assert ledger.attempt_evidence_for(authorization_id, operation.operation_id) == evidence

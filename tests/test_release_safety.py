@@ -190,3 +190,43 @@ def test_release_gate_module_has_no_network_or_zotero_client_imports() -> None:
     }
 
     assert imports.isdisjoint({"requests", "httpx", "urllib", "zotero", "pyzotero", "socket"})
+
+
+def test_issued_authorization_binds_targets_projected_from_approved_snapshot() -> None:
+    preview_plan, apply_request, validation_evidence = _approved_release_artifacts()
+
+    authorization = authorize(
+        ReleaseRequest(
+            mode=ReleaseMode.LIVE,
+            human_approved=True,
+            preview_plan=preview_plan,
+            apply_request=apply_request,
+            validation_evidence=validation_evidence,
+        )
+    )
+
+    assert authorization.is_issued
+    assert authorization.allowed_tag_targets == tuple(f"#topic-{number:02d}" for number in range(10))
+    assert authorization.allowed_collection_keys == ()
+    assert authorization.permits_target("tag", "#topic-00")
+    assert not authorization.permits_target("tag", "#forged")
+
+
+def test_model_built_or_serialized_authorization_is_not_a_live_capability() -> None:
+    preview_plan, apply_request, validation_evidence = _approved_release_artifacts()
+    issued = authorize(
+        ReleaseRequest(
+            mode=ReleaseMode.LIVE,
+            human_approved=True,
+            preview_plan=preview_plan,
+            apply_request=apply_request,
+            validation_evidence=validation_evidence,
+        )
+    )
+
+    forged = type(issued).model_validate(issued.model_dump())
+
+    assert issued.is_issued
+    assert forged.is_bound
+    assert not forged.is_issued
+    assert not forged.permits_target("tag", "#topic-00")

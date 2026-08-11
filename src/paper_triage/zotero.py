@@ -10,13 +10,22 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from http.client import HTTPMessage
-from typing import IO, Any, Literal, Protocol, cast
+from typing import IO, TYPE_CHECKING, Any, Literal, Protocol, Self, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .normalization import normalize_paper
-from .release_safety import ReleaseAuthorization
+from .release_safety import (
+    ReleaseAuthorization,
+    ReleaseMode,
+    ReleaseRequest,
+    ValidationEvidence,
+    authorize,
+)
+
+if TYPE_CHECKING:
+    from .audit import AuditLedger
 from .selection import select_first_real_lot
 
 _API_ROOT = "https://api.zotero.org"
@@ -352,25 +361,55 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
         *,
         transport: Transport = _http_get,
         write_transport: WriteTransport = _http_put,
-        allowed_tag_targets: frozenset[str] = frozenset(),
-        allowed_collection_keys: frozenset[str] = frozenset(),
     ) -> None:
-        if not authorization.allowed:
-            raise PermissionError("ReleaseAuthorization does not permit Zotero mutation")
+        if not authorization.is_issued:
+            raise PermissionError(
+                "ReleaseAuthorization must be an issued, snapshot-bound live capability"
+            )
         super().__init__(config, transport=transport)
         self._write_transport = write_transport
-        self._allowed_tag_targets = allowed_tag_targets
-        self._allowed_collection_keys = allowed_collection_keys
+        self._authorization = authorization
+
+    @classmethod
+    def from_persisted_release(
+        cls,
+        config: ZoteroReadConfig,
+        ledger: AuditLedger,
+        plan_hash: str,
+        *,
+        human_approved: bool,
+        validation_evidence: ValidationEvidence,
+        transport: Transport = _http_get,
+        write_transport: WriteTransport = _http_put,
+    ) -> Self:
+        """Construct a write adapter only from the ledger's immutable preview pair.
+
+        The caller supplies only the persisted plan identity, the explicit human
+        approval signal, and validation evidence.  Targets are never accepted
+        here: ``authorize`` projects them from the preview just reloaded and
+        validated by ``AuditLedger``.
+        """
+        preview_plan, apply_request = ledger.load_preview_request(plan_hash)
+        authorization = authorize(
+            ReleaseRequest(
+                mode=ReleaseMode.LIVE,
+                human_approved=human_approved,
+                preview_plan=preview_plan,
+                apply_request=apply_request,
+                validation_evidence=validation_evidence,
+            )
+        )
+        return cls(
+            config,
+            authorization,
+            transport=transport,
+            write_transport=write_transport,
+        )
 
     def mutate_item(self, command: ZoteroMutationCommand) -> ZoteroMutationReceipt:
         self._validate_command(command)
-        if command.resource == "tag" and command.target not in self._allowed_tag_targets:
-            raise PermissionError("Zotero tag mutation target is not in the snapshot allowlist")
-        if (
-            command.resource == "collection"
-            and command.target not in self._allowed_collection_keys
-        ):
-            raise PermissionError("Zotero collection mutation target is not in the snapshot allowlist")
+        if not self._authorization.permits_target(command.resource, command.target):
+            raise PermissionError("Zotero mutation target is not in the snapshot allowlist bound to approved plan")
         before_row = self._read_single_raw_item(command.item_key)
         before = _snapshot_from_response(self._config.library_id, before_row)
         if before.item_version != command.expected_version:
