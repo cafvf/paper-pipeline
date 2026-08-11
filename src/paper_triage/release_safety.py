@@ -75,6 +75,8 @@ def authorize(request: ReleaseRequest) -> ReleaseAuthorization:
         return ReleaseAuthorization(allowed=False, reason="live Zotero access requires an approved preview plan")
     if request.validation_evidence is None:
         return ReleaseAuthorization(allowed=False, reason="live Zotero access requires validation evidence")
+    if not request.human_approved:
+        return ReleaseAuthorization(allowed=False, reason="live Zotero access requires explicit human approval")
     try:
         request.apply_request.validates(request.preview_plan)
     except ValueError:
