@@ -575,6 +575,34 @@ def test_http_mutation_adapter_captures_complete_fresh_attempt_evidence() -> Non
     assert fake.writes == []
 
 
+def test_http_fake_recovery_evidence_keeps_only_non_membership_hash_stable() -> None:
+    """A successful tag write remains recoverable while unrelated fields stay locked."""
+    fake = InMemoryZoteroHttp(_item("ITEM01", tags=["#human"], collections=["LOOKKEY"]))
+    adapter = _managed_adapter(fake)
+    command = _approved_command()
+    before = adapter.capture_attempt_evidence(
+        operation_id=command.operation_id,
+        idempotency_key=command.idempotency_key,
+        item_key=command.item_key,
+        run_date=date(2026, 8, 11),
+    )
+    payload = dict(fake.row["data"])
+    payload["tags"] = [{"tag": "#human"}, {"tag": "#managed"}]
+    fake.write("https://api.zotero.org/users/123/items/ITEM01", {}, payload)
+
+    after = adapter.capture_attempt_evidence(
+        operation_id=command.operation_id,
+        idempotency_key=command.idempotency_key,
+        item_key=command.item_key,
+        run_date=date(2026, 8, 11),
+    )
+
+    assert before.tags == ("#human",)
+    assert after.tags == ("#human", "#managed")
+    assert before.collection_keys == after.collection_keys == ("LOOKKEY",)
+    assert before.preserved_field_hashes == after.preserved_field_hashes
+
+
 def test_http_mutation_adapter_rejects_a_reread_for_the_wrong_item() -> None:
     fake = InMemoryZoteroHttp(_item("OTHER01"))
     adapter = _managed_adapter(fake)

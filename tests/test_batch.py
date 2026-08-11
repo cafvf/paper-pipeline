@@ -57,7 +57,7 @@ class LocalBatchPort:
             item_version=next(self._versions),
             tags=(),
             collection_keys=(),
-            preserved_field_hashes={"source": "a" * 64},
+            preserved_field_hashes={"source": "a" * 64, "non_membership": "c" * 64},
         )
 
     def mutate_item(self, command: ZoteroMutationCommand) -> ZoteroMutationReceipt:
@@ -298,6 +298,7 @@ def test_executor_refuses_ambiguous_recovery_with_unrelated_safe_fingerprint_cha
                     "preserved_field_hashes": {
                         "source": "a" * 64,
                         "raw_item_data": "a" * 64,
+                        "non_membership": "a" * 64,
                     }
                 }
             )
@@ -319,6 +320,7 @@ def test_executor_refuses_ambiguous_recovery_with_unrelated_safe_fingerprint_cha
                     "preserved_field_hashes": {
                         "source": "a" * 64,
                         "raw_item_data": "b" * 64,
+                        "non_membership": "b" * 64,
                     },
                 }
             )
@@ -343,6 +345,32 @@ def test_executor_refuses_ambiguous_recovery_with_unrelated_safe_fingerprint_cha
         for item in preview.items[1:]
         for later in item.operations
     )
+
+
+def test_executor_refuses_recovery_when_an_unapproved_membership_also_changed(
+    tmp_path: Path,
+) -> None:
+    preview, request = _batch_preview()
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_preview_request(preview, request)
+    with pytest.raises(RuntimeError, match="simulated transport failure"):
+        execute_persisted_preview(preview.plan_hash, ledger, LocalBatchPort([1] * 10, fail_write=True))
+
+    class ExtraMembershipRecoveryPort(LocalBatchPort):
+        def __init__(self) -> None:
+            super().__init__([2])
+
+        def capture_attempt_evidence(self, **kwargs: object) -> AttemptEvidence:
+            evidence = super().capture_attempt_evidence(**kwargs)
+            return evidence.model_copy(update={"tags": ("#manual", "#topic-0")})
+
+    recovery_port = ExtraMembershipRecoveryPort()
+    with pytest.raises(ValueError, match="cannot be verified"):
+        execute_persisted_preview(preview.plan_hash, ledger, recovery_port)
+
+    states = _latest_states(ledger, request.approval.approval_id)
+    assert recovery_port.mutation_calls == 0
+    assert states[preview.items[0].operations[0].operation_id] == "failed"
 
 
 def _two_operation_preview() -> tuple[PreviewPlan, ApplyRequest]:

@@ -301,11 +301,11 @@ def _is_exact_recovery_diff(
 ) -> bool:
     """Accept recovery only when evidence proves the sole approved delta.
 
-    Membership snapshots prove the requested tag/collection delta precisely;
-    the complete safe fingerprint map prevents an unrelated data-field edit
-    from being mistaken for a successful mutation.  A port that cannot provide
-    stable target-excluded safe fingerprints is therefore conservatively
-    unrecoverable rather than allowed to replay or claim success.
+    Membership snapshots prove the requested tag/collection delta precisely.
+    ``source`` and the raw item hash legitimately change when that target is
+    added or removed, so recovery instead compares the adapter's stable
+    target-excluded/non-membership fingerprint.  Missing evidence is unsafe:
+    a port must provide this hash before an uncertain write can be verified.
     """
     before_tags = set(before.tags)
     before_collections = set(before.collection_keys)
@@ -319,7 +319,9 @@ def _is_exact_recovery_diff(
     return (
         set(after.tags) == expected_tags
         and set(after.collection_keys) == expected_collections
-        and after.preserved_field_hashes == before.preserved_field_hashes
+        and after.preserved_field_hashes.get("non_membership")
+        == before.preserved_field_hashes.get("non_membership")
+        and "non_membership" in before.preserved_field_hashes
     )
 
 

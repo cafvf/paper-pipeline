@@ -360,6 +360,7 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
         transport: Transport = _http_get,
         write_transport: WriteTransport = _http_put,
         ledger: AuditLedger | None = None,
+        authorization_id: str | None = None,
     ) -> None:
         if not authorization.is_issued:
             raise PermissionError(
@@ -371,6 +372,8 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
         # A caller-provided provenance DTO is only an ownership-operation
         # selector.  The durable ledger remains the sole authority for removal.
         self._ledger = ledger
+        self._authorization_id = authorization_id
+        self._attempt_sources: dict[tuple[str, str, str], str] = {}
 
     @classmethod
     def from_persisted_release(
@@ -407,6 +410,7 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
             transport=transport,
             write_transport=write_transport,
             ledger=ledger,
+            authorization_id=apply_request.approval.approval_id,
         )
 
     def mutate_item(self, command: ZoteroMutationCommand) -> ZoteroMutationReceipt:
@@ -491,6 +495,25 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
         )
         if snapshot.item_key != item_key:
             raise ZoteroTransportError("Zotero item reread returned an unexpected item")
+        identity = (operation_id, idempotency_key, item_key)
+        durable = (
+            self._ledger.attempt_evidence_for(self._authorization_id, operation_id)
+            if self._ledger is not None and self._authorization_id is not None
+            else None
+        )
+        durable_source = (
+            durable.preserved_field_hashes.get("source")
+            if durable is not None
+            and durable.idempotency_key == idempotency_key
+            and durable.item_key == item_key
+            else None
+        )
+        source = self._attempt_sources.get(identity) or durable_source
+        if source is None:
+            source = normalize_paper(
+                snapshot.normalization_mapping(), run_date=run_date
+            ).source_fingerprint
+            self._attempt_sources[identity] = source
         return AttemptEvidence(
             operation_id=operation_id,
             idempotency_key=idempotency_key,
@@ -499,10 +522,8 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
             tags=tuple(sorted(snapshot.tags)),
             collection_keys=tuple(sorted(snapshot.collections)),
             preserved_field_hashes={
-                "source": normalize_paper(
-                    snapshot.normalization_mapping(), run_date=run_date
-                ).source_fingerprint,
-                "raw_item_data": snapshot.preserved_fields_hash,
+                "source": source,
+                "raw_item_data": _non_membership_data_hash(snapshot),
             },
         )
 
@@ -637,6 +658,20 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
                 return ""
             data["collections"] = [key for key in collections if key != command.target]
         return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _non_membership_data_hash(item: ZoteroItemSnapshot) -> str:
+    """Hash only metadata that membership mutations are not allowed to change.
+
+    Tags and collection keys are captured separately in ``AttemptEvidence`` so
+    recovery can prove their exact approved delta.  Including them in this hash
+    would make every successful membership write look like an unrelated edit.
+    """
+    data = json.loads(item.raw_data_json)
+    data.pop("tags", None)
+    data.pop("collections", None)
+    encoded = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _snapshot_from_response(library_id: str, row: Mapping[str, object]) -> ZoteroItemSnapshot:
