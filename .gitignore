@@ -1,0 +1,30 @@
+# Python environments, caches, and build output
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+*.egg-info/
+
+# Runtime configuration and secrets
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite3
+*.db
+*.log
+
+# OMX runtime state and execution logs; planning artifacts are explicitly added.
+.omx/*
+!.omx/plans/
+!.omx/plans/*.md
+!.omx/context/
+!.omx/context/*.md
+!.omx/ultragoal/
+!.omx/ultragoal/brief.md
+!.omx/ultragoal/goals.json
+!.omx/ultragoal/ledger.jsonl
+.omx/ultragoal/
