@@ -23,6 +23,9 @@ line-length = 100
 python_version = "3.11"
 strict = true
 packages = ["paper_triage"]
+# Production code is type-checked strictly; tests are behavioral fixtures and
+# are checked by pytest and Ruff rather than being an implicit second API.
+exclude = "^tests/"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/paper_triage"]
