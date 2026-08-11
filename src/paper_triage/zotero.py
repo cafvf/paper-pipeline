@@ -368,6 +368,29 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
             )
         if ledger is None or not authorization_id:
             raise PermissionError("Zotero mutation requires a persisted ledger authorization")
+        plan_hash = authorization.plan_hash
+        approval_digest = authorization.approval_confirmation_digest
+        if plan_hash is None or approval_digest is None:
+            raise PermissionError("Zotero mutation requires a bound release capability")
+        if not ledger.authorization_matches(
+            authorization_id,
+            plan_hash=plan_hash,
+            approval_confirmation_digest=approval_digest,
+            reviewed_diff_hash=None,
+        ):
+            raise PermissionError(
+                "Zotero mutation authorization does not match the issued release capability"
+            )
+        try:
+            persisted_preview, persisted_request = ledger.load_preview_request(plan_hash)
+        except ValueError:
+            raise PermissionError("Zotero mutation requires an immutable persisted preview") from None
+        if not authorization.matches_approved_preview(
+            persisted_preview, persisted_request.approval.confirmation_digest
+        ):
+            raise PermissionError(
+                "Zotero mutation capability does not match the immutable persisted preview"
+            )
         super().__init__(config, transport=transport)
         self._write_transport = write_transport
         self._authorization = authorization
@@ -397,6 +420,7 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
         validated by ``AuditLedger``.
         """
         preview_plan, apply_request = ledger.load_preview_request(plan_hash)
+        authorization_id = ledger.persist_preview_authorization(plan_hash)
         authorization = authorize(
             ReleaseRequest(
                 mode=ReleaseMode.LIVE,
@@ -412,7 +436,7 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
             transport=transport,
             write_transport=write_transport,
             ledger=ledger,
-            authorization_id=apply_request.approval.approval_id,
+            authorization_id=authorization_id,
         )
 
     def mutate_item(self, command: ZoteroMutationCommand) -> ZoteroMutationReceipt:

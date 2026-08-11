@@ -693,6 +693,81 @@ def test_mutation_adapter_rejects_issued_capability_without_persisted_ledger_bin
     assert fake.writes == []
 
 
+def test_mutation_adapter_rejects_cross_plan_ledger_authorization(tmp_path: Path) -> None:
+    """A valid capability cannot be paired with another preview's ledger row."""
+    fake = InMemoryZoteroHttp(_item("ITEM01"))
+    other_preview, other_request, _other_validation = _release_artifacts(resource="collection")
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_preview_request(other_preview, other_request)
+    authorization_id = ledger.persist_preview_authorization(other_preview.plan_hash)
+
+    with pytest.raises(PermissionError, match="does not match"):
+        ZoteroHttpMutationAdapter(
+            ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
+            _live_authorization(),
+            transport=fake.read,
+            write_transport=fake.write,
+            ledger=ledger,
+            authorization_id=authorization_id,
+        )
+
+    assert fake.writes == []
+
+
+def test_mutation_adapter_rejects_model_copied_capability_with_forged_operation_target(
+    tmp_path: Path,
+) -> None:
+    """Copying the private issue marker cannot widen a persisted preview."""
+    fake = InMemoryZoteroHttp(_item("ITEM01"))
+    preview, request, validation_evidence = _release_artifacts()
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_preview_request(preview, request)
+    authorization_id = ledger.persist_preview_authorization(preview.plan_hash)
+    issued = authorize(
+        ReleaseRequest(
+            mode=ReleaseMode.LIVE,
+            human_approved=True,
+            preview_plan=preview,
+            apply_request=request,
+            validation_evidence=validation_evidence,
+        )
+    )
+    evil_mutations = tuple(
+        mutation.model_copy(update={"target": "#evil"})
+        for mutation in issued.approved_mutations
+    )
+    assert issued.plan_hash is not None
+    assert issued.approval_confirmation_digest is not None
+    assert issued.validation_digest is not None
+    forged = issued.model_copy(
+        update={
+            "allowed_tag_targets": ("#evil",),
+            "approved_mutations": evil_mutations,
+            "mutation_allowlist_digest": ReleaseAuthorization.mutation_allowlist_digest_for(
+                plan_hash=issued.plan_hash,
+                approval_confirmation_digest=issued.approval_confirmation_digest,
+                validation_digest=issued.validation_digest,
+                allowed_tag_targets=("#evil",),
+                allowed_collection_keys=issued.allowed_collection_keys,
+                approved_mutations=evil_mutations,
+            ),
+        }
+    )
+    assert forged.is_issued
+
+    with pytest.raises(PermissionError, match="immutable persisted preview"):
+        ZoteroHttpMutationAdapter(
+            ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
+            forged,
+            transport=fake.read,
+            write_transport=fake.write,
+            ledger=ledger,
+            authorization_id=authorization_id,
+        )
+
+    assert fake.writes == []
+
+
 def test_persisted_release_factory_rejects_write_without_durable_attempt(tmp_path: Path) -> None:
     fake = InMemoryZoteroHttp(_item("ITEM01", tags=["#human"]))
     preview, request, validation_evidence = _release_artifacts()

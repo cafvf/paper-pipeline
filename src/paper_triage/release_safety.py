@@ -201,6 +201,26 @@ class ReleaseAuthorization(BaseModel):
             return approved.expected_version is None or approved.expected_version == expected_version
         return False
 
+    def matches_approved_preview(
+        self, preview_plan: PreviewPlan, approval_confirmation_digest: str
+    ) -> bool:
+        """Prove this issued capability is the unmodified projection of a plan.
+
+        Private issue markers are process-local, but Pydantic's public model
+        copying can preserve private attributes.  A live connector therefore
+        must also compare every projected operation against the immutable
+        preview reloaded from the ledger.
+        """
+        if not self.is_issued or self.plan_hash != preview_plan.plan_hash:
+            return False
+        tags, collections, mutations = _snapshot_allowlists(preview_plan)
+        return (
+            self.approval_confirmation_digest == approval_confirmation_digest
+            and self.allowed_tag_targets == tags
+            and self.allowed_collection_keys == collections
+            and self.approved_mutations == mutations
+        )
+
     @classmethod
     def _issue(cls, **fields: object) -> ReleaseAuthorization:
         authorization = cls.model_validate(fields)
