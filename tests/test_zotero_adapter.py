@@ -71,18 +71,61 @@ def _item(
     }
 
 
-def test_config_is_constructed_only_from_runtime_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ZOTERO_LIBRARY_TYPE", "users")
-    monkeypatch.setenv("ZOTERO_LIBRARY_ID", "123")
-    monkeypatch.setenv("ZOTERO_API_KEY", "secret-value")
+def _write_protected_env(path: Path, contents: str) -> None:
+    path.write_text(contents, encoding="utf-8")
+    path.chmod(0o600)
 
-    config = ZoteroReadConfig.from_environment()
+
+def test_config_is_constructed_from_protected_env_not_process_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_file = tmp_path / ".env"
+    _write_protected_env(
+        env_file,
+        "ZOTERO_LIBRARY_TYPE=users\nZOTERO_LIBRARY_ID=123\nZOTERO_API_KEY=secretvalue123\n",
+    )
+    monkeypatch.setenv("ZOTERO_API_KEY", "ambient-secret-must-not-be-used")
+
+    config = ZoteroReadConfig.from_env_file(env_file)
 
     assert config.library_type == "users"
     assert config.library_id == "123"
-    assert "secret-value" not in repr(config)
+    assert "secretvalue123" not in repr(config)
+
+
+@pytest.mark.parametrize(
+    ("contents", "mode"),
+    [
+        ("ZOTERO_LIBRARY_TYPE=users\nZOTERO_LIBRARY_ID=123\nZOTERO_API_KEY=abc123\n", 0o644),
+        ("ZOTERO_LIBRARY_TYPE=users\nZOTERO_LIBRARY_ID=123\nZOTERO_API_KEY=abc123\nEXTRA=value\n", 0o600),
+        ("ZOTERO_LIBRARY_TYPE=users\nZOTERO_LIBRARY_ID=123\nZOTERO_API_KEY=abc123\nZOTERO_API_KEY=other\n", 0o600),
+        ("ZOTERO_LIBRARY_TYPE=users\nZOTERO_LIBRARY_ID=123\nZOTERO_API_KEY='abc123'\n", 0o600),
+    ],
+)
+def test_env_loader_rejects_unsafe_file_or_unexpected_content(
+    tmp_path: Path, contents: str, mode: int
+) -> None:
+    env_file = tmp_path / ".env"
+    _write_protected_env(env_file, contents)
+    env_file.chmod(mode)
+
+    with pytest.raises(ZoteroConfigurationError) as error:
+        ZoteroReadConfig.from_env_file(env_file)
+
+    assert "abc123" not in str(error.value)
+
+
+def test_env_loader_rejects_symlink_without_reading_target(tmp_path: Path) -> None:
+    target = tmp_path / "secret.env"
+    _write_protected_env(
+        target,
+        "ZOTERO_LIBRARY_TYPE=users\nZOTERO_LIBRARY_ID=123\nZOTERO_API_KEY=abc123\n",
+    )
+    env_file = tmp_path / ".env"
+    env_file.symlink_to(target)
+
+    with pytest.raises(ZoteroConfigurationError, match="unavailable or unsafe"):
+        ZoteroReadConfig.from_env_file(env_file)
 
 
 def test_http_adapter_maps_read_response_and_never_exposes_token() -> None:

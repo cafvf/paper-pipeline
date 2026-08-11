@@ -6,10 +6,12 @@ import hashlib
 import json
 import os
 import re
+import stat
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from http.client import HTTPMessage
+from pathlib import Path
 from typing import IO, Any, Literal, Protocol, Self, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -30,6 +32,8 @@ _API_ROOT = "https://api.zotero.org"
 _LIBRARY_TYPES = frozenset({"users", "groups"})
 _LIBRARY_ID = re.compile(r"^[0-9]+$")
 _ZOTERO_KEY = re.compile(r"^[A-Za-z0-9]{1,32}$")
+_ENV_KEY = re.compile(r"^(ZOTERO_LIBRARY_TYPE|ZOTERO_LIBRARY_ID|ZOTERO_API_KEY)$")
+_ENV_MAX_BYTES = 8 * 1024
 _READ_TIMEOUT_SECONDS = 15
 _MAX_READ_ATTEMPTS = 3
 
@@ -44,7 +48,7 @@ class ZoteroTransportError(RuntimeError):
 
 @dataclass(frozen=True)
 class ZoteroReadConfig:
-    """Configuration supplied at construction, normally via process environment."""
+    """Runtime-only Zotero configuration loaded from a local protected ``.env`` file."""
 
     library_type: Literal["users", "groups"]
     library_id: str
@@ -54,25 +58,69 @@ class ZoteroReadConfig:
         if (
             self.library_type not in _LIBRARY_TYPES
             or not _LIBRARY_ID.fullmatch(self.library_id)
-            or not self.api_key
+            or not _ZOTERO_KEY.fullmatch(self.api_key)
         ):
             raise ZoteroConfigurationError("Zotero read configuration is incomplete or invalid")
 
     @classmethod
-    def from_environment(cls, environ: Mapping[str, str] | None = None) -> ZoteroReadConfig:
-        values = os.environ if environ is None else environ
-        library_type = values.get("ZOTERO_LIBRARY_TYPE", "users")
-        library_id = values.get("ZOTERO_LIBRARY_ID", "")
-        api_key = values.get("ZOTERO_API_KEY", "")
-        if library_type not in _LIBRARY_TYPES or not library_id or not api_key:
-            raise ZoteroConfigurationError(
-                "ZOTERO_LIBRARY_TYPE, ZOTERO_LIBRARY_ID, and ZOTERO_API_KEY are required"
-            )
+    def from_env_file(cls, env_path: Path | None = None) -> ZoteroReadConfig:
+        """Load only the three Zotero values from a regular, owner-only local file.
+
+        The file is deliberately not merged into ``os.environ``: this avoids carrying
+        the API key into child processes or unrelated application configuration.
+        """
+        path = Path(".env") if env_path is None else env_path
+        values = _read_protected_env(path)
+        required = {"ZOTERO_LIBRARY_TYPE", "ZOTERO_LIBRARY_ID", "ZOTERO_API_KEY"}
+        missing = required.difference(values)
+        if missing:
+            raise ZoteroConfigurationError("Zotero .env is missing required configuration")
         return cls(
-            library_type=cast(Literal["users", "groups"], library_type),
-            library_id=library_id,
-            api_key=api_key,
+            library_type=cast(Literal["users", "groups"], values["ZOTERO_LIBRARY_TYPE"]),
+            library_id=values["ZOTERO_LIBRARY_ID"],
+            api_key=values["ZOTERO_API_KEY"],
         )
+
+
+def _read_protected_env(path: Path) -> dict[str, str]:
+    """Read a deliberately small dotenv subset without interpolation or exporting values."""
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+    except OSError:
+        raise ZoteroConfigurationError("Zotero .env is unavailable or unsafe") from None
+
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > _ENV_MAX_BYTES:
+            raise ZoteroConfigurationError("Zotero .env is unavailable or unsafe")
+        if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
+            raise ZoteroConfigurationError("Zotero .env must be owned by the current user")
+        if stat.S_IMODE(metadata.st_mode) & 0o077:
+            raise ZoteroConfigurationError("Zotero .env permissions must be 0600 or stricter")
+        with os.fdopen(descriptor, "r", encoding="utf-8", closefd=False) as stream:
+            raw = stream.read(_ENV_MAX_BYTES + 1)
+        if len(raw.encode("utf-8")) > _ENV_MAX_BYTES:
+            raise ZoteroConfigurationError("Zotero .env is unavailable or unsafe")
+    except UnicodeError:
+        raise ZoteroConfigurationError("Zotero .env is unavailable or unsafe") from None
+    finally:
+        os.close(descriptor)
+
+    values: dict[str, str] = {}
+    for line_number, raw_line in enumerate(raw.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise ZoteroConfigurationError(f"Zotero .env has invalid syntax at line {line_number}")
+        key, value = (part.strip() for part in line.split("=", 1))
+        if not _ENV_KEY.fullmatch(key) or not value or value.startswith(("'", '\"')):
+            raise ZoteroConfigurationError(f"Zotero .env has invalid syntax at line {line_number}")
+        if key in values:
+            raise ZoteroConfigurationError("Zotero .env contains duplicate configuration")
+        values[key] = value
+    return values
 
 
 @dataclass(frozen=True)
