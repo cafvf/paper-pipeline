@@ -420,7 +420,6 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
         validated by ``AuditLedger``.
         """
         preview_plan, apply_request = ledger.load_preview_request(plan_hash)
-        authorization_id = ledger.persist_preview_authorization(plan_hash)
         authorization = authorize(
             ReleaseRequest(
                 mode=ReleaseMode.LIVE,
@@ -430,6 +429,7 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
                 validation_evidence=validation_evidence,
             )
         )
+        authorization_id = ledger.persist_preview_authorization(plan_hash)
         return cls(
             config,
             authorization,
