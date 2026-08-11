@@ -352,16 +352,20 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
         *,
         transport: Transport = _http_get,
         write_transport: WriteTransport = _http_put,
+        allowed_tag_targets: frozenset[str] = frozenset(),
         allowed_collection_keys: frozenset[str] = frozenset(),
     ) -> None:
         if not authorization.allowed:
             raise PermissionError("ReleaseAuthorization does not permit Zotero mutation")
         super().__init__(config, transport=transport)
         self._write_transport = write_transport
+        self._allowed_tag_targets = allowed_tag_targets
         self._allowed_collection_keys = allowed_collection_keys
 
     def mutate_item(self, command: ZoteroMutationCommand) -> ZoteroMutationReceipt:
         self._validate_command(command)
+        if command.resource == "tag" and command.target not in self._allowed_tag_targets:
+            raise PermissionError("Zotero tag mutation target is not in the snapshot allowlist")
         if (
             command.resource == "collection"
             and command.target not in self._allowed_collection_keys

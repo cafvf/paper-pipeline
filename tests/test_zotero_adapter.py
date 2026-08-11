@@ -252,7 +252,24 @@ class InMemoryZoteroHttp:
 
 
 def _live_authorization() -> ReleaseAuthorization:
-    return ReleaseAuthorization(allowed=True, reason="test-only release authorization")
+    return ReleaseAuthorization(
+        allowed=True,
+        reason="test-only release authorization",
+        plan_hash="a" * 64,
+        approval_confirmation_digest="b" * 64,
+        validation_digest="c" * 64,
+    )
+
+
+def _managed_adapter(fake: InMemoryZoteroHttp, **kwargs: object) -> ZoteroHttpMutationAdapter:
+    return ZoteroHttpMutationAdapter(
+        ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
+        _live_authorization(),
+        transport=fake.read,
+        write_transport=fake.write,
+        allowed_tag_targets=frozenset({"#managed"}),
+        **kwargs,
+    )
 
 
 def test_managed_http_mutation_requires_authorization_and_verifies_exact_diff() -> None:
@@ -267,9 +284,7 @@ def test_managed_http_mutation_requires_authorization_and_verifies_exact_diff() 
             write_transport=fake.write,
         )
 
-    adapter = ZoteroHttpMutationAdapter(
-        config, _live_authorization(), transport=fake.read, write_transport=fake.write
-    )
+    adapter = _managed_adapter(fake)
     receipt = adapter.mutate_item(
         ZoteroMutationCommand(
             operation_id="op-1",
@@ -305,12 +320,7 @@ def test_managed_http_mutation_rejects_changes_to_unrelated_item_data() -> None:
             return status, request_id
 
     fake = TamperingZoteroHttp(_item("ITEM0001", tags=["#human"]))
-    adapter = ZoteroHttpMutationAdapter(
-        ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
-        _live_authorization(),
-        transport=fake.read,
-        write_transport=fake.write,
-    )
+    adapter = _managed_adapter(fake)
 
     with pytest.raises(ZoteroTransportError, match="ZOTERO_EXACT_DIFF_VIOLATION"):
         adapter.mutate_item(
@@ -330,12 +340,7 @@ def test_managed_http_mutation_rejects_changes_to_unrelated_item_data() -> None:
 
 def test_managed_http_mutation_rejects_unmanaged_removal_and_external_change() -> None:
     fake = InMemoryZoteroHttp(_item("ITEM0001", version=2, tags=["#human", "#managed"]))
-    adapter = ZoteroHttpMutationAdapter(
-        ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
-        _live_authorization(),
-        transport=fake.read,
-        write_transport=fake.write,
-    )
+    adapter = _managed_adapter(fake)
     command = ZoteroMutationCommand(
         operation_id="remove-1",
         idempotency_key="idempotency-2",
@@ -369,12 +374,7 @@ def test_managed_http_mutation_rejects_unmanaged_removal_and_external_change() -
 @pytest.mark.parametrize("target", ["$advisory", "!flag", "plain", "#bad/evil"])
 def test_managed_http_mutation_allows_only_canonical_writable_tag_targets(target: str) -> None:
     fake = InMemoryZoteroHttp(_item("ITEM0001"))
-    adapter = ZoteroHttpMutationAdapter(
-        ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
-        _live_authorization(),
-        transport=fake.read,
-        write_transport=fake.write,
-    )
+    adapter = _managed_adapter(fake)
     with pytest.raises(ValueError, match="canonical"):
         adapter.mutate_item(
             ZoteroMutationCommand(
@@ -386,15 +386,24 @@ def test_managed_http_mutation_allows_only_canonical_writable_tag_targets(target
     assert fake.writes == []
 
 
+def test_managed_http_mutation_rejects_canonical_tag_outside_snapshot_allowlist() -> None:
+    fake = InMemoryZoteroHttp(_item("ITEM0001"))
+    adapter = _managed_adapter(fake)
+
+    with pytest.raises(PermissionError, match="snapshot allowlist"):
+        adapter.mutate_item(
+            ZoteroMutationCommand(
+                operation_id="op-1", idempotency_key="id-1", item_key="ITEM0001",
+                expected_version=1, resource="tag", action="add", target="#unreviewed",
+                expected_present=False, desired_present=True,
+            )
+        )
+    assert fake.writes == []
+
+
 def test_managed_http_mutation_collection_target_must_be_from_snapshot_allowlist() -> None:
     fake = InMemoryZoteroHttp(_item("ITEM0001", collections=[]))
-    adapter = ZoteroHttpMutationAdapter(
-        ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
-        _live_authorization(),
-        transport=fake.read,
-        write_transport=fake.write,
-        allowed_collection_keys=frozenset({"STAGEKEY"}),
-    )
+    adapter = _managed_adapter(fake, allowed_collection_keys=frozenset({"STAGEKEY"}))
     command = ZoteroMutationCommand(
         operation_id="collection-1", idempotency_key="collection-id", item_key="ITEM0001",
         expected_version=1, resource="collection", action="add", target="OTHERKEY",
