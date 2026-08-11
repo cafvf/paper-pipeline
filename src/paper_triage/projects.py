@@ -40,9 +40,12 @@ class ReadOnlyEfforts:
     """Discover markdown files beneath ``root`` without any write capability."""
 
     def __init__(self, root: Path) -> None:
-        self._root = root.expanduser().resolve()
-        if not self._root.is_dir() or self._root.is_symlink():
+        # Check the user-supplied path before resolving it: after ``resolve`` a
+        # symlink loses that identity and could silently redirect the boundary.
+        supplied_root = root.expanduser()
+        if supplied_root.is_symlink() or not supplied_root.is_dir():
             raise ValueError("Efforts root must be a real directory")
+        self._root = supplied_root.resolve()
 
     def discover(self) -> tuple[ProjectProfile, ...]:
         profiles: list[ProjectProfile] = []
