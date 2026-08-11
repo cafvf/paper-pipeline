@@ -265,11 +265,26 @@ class AuditLedger:
             "approval_method TEXT NOT NULL CHECK(approval_method = 'local_interactive'))"
         )
         self._connection.execute(
+            "CREATE TABLE IF NOT EXISTS authorized_operation "
+            "(authorization_id TEXT NOT NULL REFERENCES apply_authorization(authorization_id), "
+            "operation_id TEXT NOT NULL, item_key TEXT NOT NULL, resource TEXT NOT NULL, "
+            "target TEXT NOT NULL, action TEXT NOT NULL CHECK(action IN ('add', 'remove')), "
+            "expected_version INTEGER NOT NULL, PRIMARY KEY(authorization_id, operation_id))"
+        )
+        self._connection.execute(
+            "CREATE TRIGGER IF NOT EXISTS authorized_operation_no_update "
+            "BEFORE UPDATE ON authorized_operation BEGIN SELECT RAISE(ABORT, 'immutable authorized operation'); END"
+        )
+        self._connection.execute(
+            "CREATE TRIGGER IF NOT EXISTS authorized_operation_no_delete "
+            "BEFORE DELETE ON authorized_operation BEGIN SELECT RAISE(ABORT, 'immutable authorized operation'); END"
+        )
+        self._connection.execute(
             "CREATE TABLE IF NOT EXISTS operation_ledger "
             "(sequence INTEGER PRIMARY KEY, authorization_id TEXT NOT NULL "
             "REFERENCES apply_authorization(authorization_id), operation_id TEXT NOT NULL, "
             "state TEXT NOT NULL CHECK(state IN "
-            "('planned', 'attempted', 'verified', 'skipped_stale', 'aborted', 'uncertain')), "
+            "('planned', 'prepared', 'attempted', 'verified', 'failed', 'skipped_stale', 'aborted', 'uncertain')), "
             "expected_version INTEGER NOT NULL, observed_version INTEGER, "
             "UNIQUE(authorization_id, operation_id, state))"
         )
@@ -307,7 +322,7 @@ class AuditLedger:
         row = self._connection.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'operation_ledger'"
         ).fetchone()
-        if row is None or "'uncertain'" in row[0]:
+        if row is None or ("'uncertain'" in row[0] and "'failed'" in row[0] and "'prepared'" in row[0]):
             return
         with self._connection:
             self._connection.execute(
@@ -318,7 +333,7 @@ class AuditLedger:
                 "(sequence INTEGER PRIMARY KEY, authorization_id TEXT NOT NULL "
                 "REFERENCES apply_authorization(authorization_id), operation_id TEXT NOT NULL, "
                 "state TEXT NOT NULL CHECK(state IN "
-                "('planned', 'attempted', 'verified', 'skipped_stale', 'aborted', 'uncertain')), "
+                "('planned', 'prepared', 'attempted', 'verified', 'failed', 'skipped_stale', 'aborted', 'uncertain')), "
                 "expected_version INTEGER NOT NULL, observed_version INTEGER, "
                 "UNIQUE(authorization_id, operation_id, state))"
             )
@@ -387,12 +402,60 @@ class AuditLedger:
             raise ValueError("persisted preview hash is inconsistent")
         return plan, request
 
-    def persist_preview_authorization(self, plan_hash: str) -> str:
-        """Materialize batch apply authority solely from its persisted approval.
+    def _ensure_authorized_operations(
+        self,
+        authorization_id: str,
+        operations: Sequence[tuple[str, str, str, str, str, int]],
+    ) -> None:
+        """Atomically establish the immutable operation set and its planned rows.
 
-        The caller supplies only a plan hash.  Every item, operation, reviewed
-        diff, and confirmation digest is reloaded from the immutable canonical
-        preview/request pair, so a batch executor cannot widen its authority.
+        The tuple is ``(operation_id, item_key, resource, target, action,
+        expected_version)``.  Replays are deliberately no-ops only when every
+        persisted row agrees byte-for-byte with the approved projection.
+        """
+        expected = tuple(operations)
+        existing = tuple(
+            self._connection.execute(
+                "SELECT operation_id, item_key, resource, target, action, expected_version "
+                "FROM authorized_operation WHERE authorization_id = ? ORDER BY operation_id",
+                (authorization_id,),
+            )
+        )
+        if existing:
+            if existing != tuple(sorted(expected)):
+                raise ValueError("authorized operations conflict with immutable approval")
+        else:
+            self._connection.executemany(
+                "INSERT INTO authorized_operation "
+                "(authorization_id, operation_id, item_key, resource, target, action, expected_version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ((authorization_id, *operation) for operation in expected),
+            )
+        for operation_id, _, _, _, _, expected_version in expected:
+            row = self._connection.execute(
+                "SELECT state, expected_version FROM operation_ledger "
+                "WHERE authorization_id = ? AND operation_id = ? ORDER BY sequence LIMIT 1",
+                (authorization_id, operation_id),
+            ).fetchone()
+            if row is None:
+                self._connection.execute(
+                    "INSERT INTO operation_ledger "
+                    "(authorization_id, operation_id, state, expected_version, observed_version) "
+                    "VALUES (?, ?, 'planned', ?, NULL)",
+                    (authorization_id, operation_id, expected_version),
+                )
+            elif row != ("planned", expected_version):
+                # Terminal/active rows are a valid recovery replay; only the
+                # immutable initial row is checked by the authorization table.
+                continue
+
+    def persist_preview_authorization(self, plan_hash: str) -> str:
+        """Atomically materialize batch authority and every approved operation.
+
+        No caller-controlled item or operation data reaches this boundary: all
+        rows come from the persisted canonical preview and its validated human
+        approval.  This gives a restarted executor a complete work set before
+        any external operation is possible.
         """
         plan, request = self.load_preview_request(plan_hash)
         digest_row = self._connection.execute(
@@ -410,32 +473,32 @@ class AuditLedger:
             approval_method=request.approval.approval_method,
         )
         expected_row = (
-            authorization.authorization_id,
-            authorization.plan_hash,
-            authorization.reviewed_diff_hash,
-            _canonical_json(authorization.approved_item_keys),
-            _canonical_json(authorization.approved_operation_ids),
-            authorization.confirmation_digest,
+            authorization.authorization_id, authorization.plan_hash,
+            authorization.reviewed_diff_hash, _canonical_json(authorization.approved_item_keys),
+            _canonical_json(authorization.approved_operation_ids), authorization.confirmation_digest,
             authorization.approval_method,
         )
-        existing = self._connection.execute(
-            "SELECT authorization_id, plan_hash, reviewed_diff_hash, approved_item_keys_json, "
-            "approved_operation_ids_json, confirmation_digest, approval_method "
-            "FROM apply_authorization WHERE plan_hash = ?",
-            (plan_hash,),
-        ).fetchone()
-        if existing is not None:
-            if existing != expected_row:
-                raise ValueError("persisted batch authorization conflicts with canonical preview")
-            return authorization.authorization_id
+        operations = tuple(
+            (operation.operation_id, item.item_key, operation.resource_type, operation.target,
+             operation.action, item.preview_item_version)
+            for item in plan.items for operation in item.operations
+        )
         with self._connection:
-            self._connection.execute(
-                "INSERT INTO apply_authorization "
-                "(authorization_id, plan_hash, reviewed_diff_hash, approved_item_keys_json, "
-                "approved_operation_ids_json, confirmation_digest, approval_method) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                expected_row,
-            )
+            existing = self._connection.execute(
+                "SELECT authorization_id, plan_hash, reviewed_diff_hash, approved_item_keys_json, "
+                "approved_operation_ids_json, confirmation_digest, approval_method "
+                "FROM apply_authorization WHERE plan_hash = ?", (plan_hash,)
+            ).fetchone()
+            if existing is None:
+                self._connection.execute(
+                    "INSERT INTO apply_authorization "
+                    "(authorization_id, plan_hash, reviewed_diff_hash, approved_item_keys_json, "
+                    "approved_operation_ids_json, confirmation_digest, approval_method) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)", expected_row,
+                )
+            elif existing != expected_row:
+                raise ValueError("persisted batch authorization conflicts with canonical preview")
+            self._ensure_authorized_operations(authorization.authorization_id, operations)
         return authorization.authorization_id
 
     def persist_authorization_and_plan(
@@ -486,6 +549,18 @@ class AuditLedger:
                     authorization.approval_method,
                 ),
             )
+            self._connection.executemany(
+                "INSERT INTO authorized_operation "
+                "(authorization_id, operation_id, item_key, resource, target, action, expected_version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    (authorization.authorization_id, operation_id, mutation_plan.item_key,
+                     entry.kind, entry.target, entry.action, mutation_plan.source_version)
+                    for operation_id, entry in zip(
+                        mutation_plan.operation_ids, mutation_plan.expected_diff, strict=True
+                    )
+                ),
+            )
             self.record(
                 authorization.plan_hash, authorization.authorization_id, "planned", commit=False
             )
@@ -517,10 +592,41 @@ class AuditLedger:
         self,
         authorization_id: str,
         operation_id: str,
-        state: Literal["planned", "attempted", "verified", "skipped_stale", "aborted", "uncertain"],
+        state: Literal["planned", "prepared", "attempted", "verified", "failed", "skipped_stale", "aborted", "uncertain"],
         expected_version: int,
         observed_version: int | None = None,
-    ) -> None:
+    ) -> bool:
+        """CAS-append one legal operation transition; identical replays are no-ops.
+
+        ``aborted`` is reserved for work that never became an external attempt
+        (for example, unstarted operations after a stale preflight).  A write
+        attempt may transition only to ``verified``, ``failed`` or ``uncertain``.
+        """
+        authorized = self._connection.execute(
+            "SELECT expected_version FROM authorized_operation WHERE authorization_id = ? AND operation_id = ?",
+            (authorization_id, operation_id),
+        ).fetchone()
+        if authorized is None:
+            raise ValueError("operation is not authorized by the persisted plan")
+        latest = self._connection.execute(
+            "SELECT state, expected_version, observed_version FROM operation_ledger "
+            "WHERE authorization_id = ? AND operation_id = ? ORDER BY sequence DESC LIMIT 1",
+            (authorization_id, operation_id),
+        ).fetchone()
+        candidate = (state, expected_version, observed_version)
+        if latest == candidate:
+            return False
+        current = None if latest is None else latest[0]
+        legal = {
+            None: {"planned", "skipped_stale", "aborted"},
+            "planned": {"prepared", "attempted", "skipped_stale", "aborted"},
+            "prepared": {"attempted", "skipped_stale", "aborted"},
+            "attempted": {"verified", "failed", "uncertain"},
+            "uncertain": {"verified", "failed"},
+            "verified": set(), "failed": set(), "skipped_stale": set(), "aborted": set(),
+        }
+        if state not in legal[current]:
+            raise ValueError(f"illegal operation transition {current!r} -> {state!r}")
         self._connection.execute(
             "INSERT INTO operation_ledger "
             "(authorization_id, operation_id, state, expected_version, observed_version) "
@@ -528,6 +634,20 @@ class AuditLedger:
             (authorization_id, operation_id, state, expected_version, observed_version),
         )
         self._connection.commit()
+        return True
+
+    def prepare_operation(
+        self, authorization_id: str, operation_id: str, *, expected_version: int
+    ) -> bool:
+        """Bind a dependent approved operation to a freshly verified version.
+
+        Authorization and the initial ``planned`` row are durable before any
+        writes.  This append-only preparation transition records the version
+        learned from a predecessor without mutating that immutable plan row.
+        """
+        return self.record_operation(
+            authorization_id, operation_id, "prepared", expected_version
+        )
 
     def operation_entries_for(self, authorization_id: str) -> tuple[OperationLedgerEntry, ...]:
         rows = self._connection.execute(
@@ -560,7 +680,7 @@ class AuditLedger:
             authority[0]
         ) or evidence.operation_id not in json.loads(authority[1]):
             raise ValueError("attempt evidence is not authorized by the approved plan")
-        if row is None or row[0] != "planned" or row[1] != evidence.item_version:
+        if row is None or row[0] not in {"planned", "prepared"} or row[1] != evidence.item_version:
             raise ValueError("attempt requires matching durably planned operation")
         with self._connection:
             self._connection.execute(
@@ -608,26 +728,46 @@ class AuditLedger:
         resource: Literal["tag", "collection"],
         target: str,
         verified_version: int,
-    ) -> None:
-        """Record removal ownership only after a verified app-owned add."""
-        state = self._connection.execute(
-            "SELECT state FROM operation_ledger WHERE authorization_id = ? AND operation_id = ? ORDER BY sequence DESC LIMIT 1",
+    ) -> bool:
+        """Persist ownership only for this authorization's verified approved add.
+
+        This makes removal provenance a consequence of the immutable approved
+        operation projection, not caller-supplied labels attached after a write.
+        """
+        operation = self._connection.execute(
+            "SELECT item_key, resource, target, action FROM authorized_operation "
+            "WHERE authorization_id = ? AND operation_id = ?",
             (authorization_id, evidence.operation_id),
         ).fetchone()
-        if state is None or state[0] != "verified":
-            raise ValueError("managed provenance requires verified operation")
+        if operation != (evidence.item_key, resource, target, "add"):
+            raise ValueError("managed provenance requires its authorized add operation")
+        state = self._connection.execute(
+            "SELECT state, observed_version FROM operation_ledger "
+            "WHERE authorization_id = ? AND operation_id = ? ORDER BY sequence DESC LIMIT 1",
+            (authorization_id, evidence.operation_id),
+        ).fetchone()
+        if state != ("verified", verified_version):
+            raise ValueError("managed provenance requires matching verified operation")
+        durable_evidence = self.attempt_evidence_for(authorization_id, evidence.operation_id)
+        if durable_evidence != evidence:
+            raise ValueError("managed provenance requires matching durable attempt evidence")
+        candidate = (
+            evidence.operation_id, authorization_id, evidence.item_key, resource, target, verified_version
+        )
+        existing = self._connection.execute(
+            "SELECT operation_id, authorization_id, item_key, resource, target, verified_version "
+            "FROM managed_provenance WHERE operation_id = ?", (evidence.operation_id,)
+        ).fetchone()
+        if existing is not None:
+            if existing != candidate:
+                raise ValueError("managed provenance conflicts with immutable verified add")
+            return False
         with self._connection:
             self._connection.execute(
                 "INSERT INTO managed_provenance(operation_id, authorization_id, item_key, resource, target, verified_version) VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    evidence.operation_id,
-                    authorization_id,
-                    evidence.item_key,
-                    resource,
-                    target,
-                    verified_version,
-                ),
+                candidate,
             )
+        return True
 
     def managed_provenance_for(
         self,
@@ -718,8 +858,10 @@ class AuditLedger:
             state: sum(entry.state == state for entry in latest.values())
             for state in (
                 "planned",
+                "prepared",
                 "attempted",
                 "verified",
+                "failed",
                 "skipped_stale",
                 "aborted",
                 "uncertain",
@@ -731,7 +873,7 @@ class AuditLedger:
             )
         elif counts["uncertain"] or counts["attempted"]:
             state = "uncertain"
-        elif counts["aborted"]:
+        elif counts["failed"] or counts["aborted"]:
             state = "aborted"
         elif latest and counts["verified"] == len(authorization.approved_operation_ids):
             state = "verified"
@@ -778,7 +920,7 @@ class VersionedMutationPort(Protocol):
 @dataclass(frozen=True)
 class OperationLedgerEntry:
     operation_id: str
-    state: Literal["planned", "attempted", "verified", "skipped_stale", "aborted", "uncertain"]
+    state: Literal["planned", "prepared", "attempted", "verified", "failed", "skipped_stale", "aborted", "uncertain"]
     expected_version: int
     observed_version: int | None
 
@@ -906,7 +1048,7 @@ def apply_versioned_plan(
             ledger.record_operation(
                 authorization.authorization_id,
                 operation_id,
-                "aborted",
+                "failed",
                 expected_version,
                 observed_version,
             )
@@ -1013,7 +1155,10 @@ def _reconcile_persisted_versioned_plan(
                     continue
             # A failed read-back is final for this run: do not retry the mutation.
             ledger.record_operation(
-                authorization.authorization_id, operation_id, "aborted", expected_version
+                authorization.authorization_id,
+                operation_id,
+                "failed" if prior is not None and prior.state in {"attempted", "uncertain"} else "aborted",
+                expected_version,
             )
         for remaining_id, _ in operations[index + 1 :]:
             if remaining_id not in latest:

@@ -315,20 +315,20 @@ def test_attempt_evidence_is_durable_before_attempt_and_only_verified_adds_estab
         approved.authorization_id, operation_id, "verified", 7, observed_version=8
     )
     ledger.record_managed_provenance(
-        approved.authorization_id, evidence, resource="tag", target="#managed", verified_version=8
+        approved.authorization_id, evidence, resource="collection", target="to-look", verified_version=8
     )
     assert ledger.managed_removal_is_authorized(
         operation_id,
         item_key=mutation_plan.item_key,
-        resource="tag",
-        target="#managed",
+        resource="collection",
+        target="to-look",
         expected_version=8,
     )
     assert not ledger.managed_removal_is_authorized(
         operation_id,
         item_key=mutation_plan.item_key,
-        resource="tag",
-        target="#managed",
+        resource="collection",
+        target="to-look",
         expected_version=9,
     )
 
@@ -505,8 +505,10 @@ def test_restart_recovery_uses_exact_persisted_authorization_and_no_port(tmp_pat
     assert report.state == "skipped_stale"
     assert report.counts == {
         "planned": 0,
+        "prepared": 0,
         "attempted": 0,
         "verified": 0,
+        "failed": 0,
         "skipped_stale": 1,
         "aborted": 1,
         "uncertain": 0,
@@ -692,14 +694,14 @@ def test_ledger_derived_managed_provenance_cannot_be_forged(tmp_path: Path) -> N
     ledger.record_attempt(approved.authorization_id, evidence)
     ledger.record_operation(approved.authorization_id, operation_id, "verified", 7, 8)
     ledger.record_managed_provenance(
-        approved.authorization_id, evidence, resource="tag", target="#managed", verified_version=8
+        approved.authorization_id, evidence, resource="collection", target="to-look", verified_version=8
     )
 
     provenance = ledger.managed_provenance_for(
         operation_id,
         item_key=mutation_plan.item_key,
-        resource="tag",
-        target="#managed",
+        resource="collection",
+        target="to-look",
         expected_version=8,
     )
     assert provenance is not None
@@ -783,3 +785,81 @@ def test_persist_preview_authorization_is_idempotent_and_binds_all_batch_operati
     )
     ledger.record_attempt(authorization_id, evidence)
     assert ledger.attempt_evidence_for(authorization_id, operation.operation_id) == evidence
+
+
+def test_batch_authorization_atomically_plans_every_approved_operation(tmp_path: Path) -> None:
+    preview, request = _batch_preview()
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_preview_request(preview, request)
+
+    authorization_id = ledger.persist_preview_authorization(preview.plan_hash)
+
+    operations = tuple(
+        operation for item in preview.items for operation in item.operations
+    )
+    assert tuple(
+        ledger.connection.execute(
+            "SELECT operation_id FROM authorized_operation WHERE authorization_id = ? ORDER BY operation_id",
+            (authorization_id,),
+        )
+    ) == tuple((operation.operation_id,) for operation in sorted(operations, key=lambda op: op.operation_id))
+    entries = ledger.operation_entries_for(authorization_id)
+    assert len(entries) == len(operations)
+    assert {entry.state for entry in entries} == {"planned"}
+
+
+def test_attempt_cas_rejects_aborted_after_write_and_allows_readback_resolution(tmp_path: Path) -> None:
+    mutation_plan = plan()
+    approved = authorization(mutation_plan)
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_authorization_and_plan(approved, mutation_plan)
+    operation_id = mutation_plan.operation_ids[0]
+    evidence = AttemptEvidence(
+        operation_id=operation_id, idempotency_key="d" * 64, item_key=mutation_plan.item_key,
+        item_version=3, tags=(), collection_keys=(), preserved_field_hashes={"source": "a" * 64},
+    )
+    ledger.record_operation(approved.authorization_id, operation_id, "planned", 3)
+    ledger.record_attempt(approved.authorization_id, evidence)
+    with pytest.raises(ValueError, match="illegal operation transition"):
+        ledger.record_operation(approved.authorization_id, operation_id, "aborted", 3)
+    ledger.record_operation(approved.authorization_id, operation_id, "uncertain", 3)
+    ledger.record_operation(approved.authorization_id, operation_id, "verified", 3, 4)
+    assert [entry.state for entry in ledger.operation_entries_for(approved.authorization_id)] == [
+        "planned", "attempted", "uncertain", "verified"
+    ]
+
+
+def test_provenance_rejects_verified_but_different_or_unauthorized_add(tmp_path: Path) -> None:
+    mutation_plan = plan()
+    approved = authorization(mutation_plan)
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_authorization_and_plan(approved, mutation_plan)
+    operation_id = mutation_plan.operation_ids[0]
+    evidence = AttemptEvidence(
+        operation_id=operation_id, idempotency_key="e" * 64, item_key=mutation_plan.item_key,
+        item_version=1, tags=(), collection_keys=(), preserved_field_hashes={"source": "a" * 64},
+    )
+    ledger.record_operation(approved.authorization_id, operation_id, "planned", 1)
+    ledger.record_attempt(approved.authorization_id, evidence)
+    ledger.record_operation(approved.authorization_id, operation_id, "verified", 1, 2)
+    with pytest.raises(ValueError, match="authorized add"):
+        ledger.record_managed_provenance(
+            approved.authorization_id, evidence, resource="tag", target="#forged", verified_version=2
+        )
+
+
+def test_prepare_binds_dependent_planned_operation_without_rewriting_authority(tmp_path: Path) -> None:
+    mutation_plan = plan()
+    approved = authorization(mutation_plan)
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_authorization_and_plan(approved, mutation_plan)
+    operation_id = mutation_plan.operation_ids[1]
+    ledger.record_operation(approved.authorization_id, operation_id, "planned", 1)
+    assert ledger.prepare_operation(approved.authorization_id, operation_id, expected_version=2)
+    evidence = AttemptEvidence(operation_id=operation_id, idempotency_key="f" * 64,
+        item_key=mutation_plan.item_key, item_version=2, tags=(), collection_keys=(),
+        preserved_field_hashes={"source": mutation_plan.source_fingerprint})
+    ledger.record_attempt(approved.authorization_id, evidence)
+    assert [entry.state for entry in ledger.operation_entries_for(approved.authorization_id) if entry.operation_id == operation_id] == [
+        "planned", "prepared", "attempted"
+    ]
