@@ -523,7 +523,7 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
             collection_keys=tuple(sorted(snapshot.collections)),
             preserved_field_hashes={
                 "source": source,
-                "raw_item_data": _non_membership_data_hash(snapshot),
+                "non_membership": _non_membership_data_hash(snapshot),
             },
         )
 

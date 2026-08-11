@@ -565,8 +565,8 @@ def test_http_mutation_adapter_captures_complete_fresh_attempt_evidence() -> Non
     assert evidence.item_version == 7
     assert evidence.tags == ("#human", "#managed")
     assert evidence.collection_keys == ("LOOKKEY",)
-    assert set(evidence.preserved_field_hashes) == {"raw_item_data", "source"}
-    assert len(evidence.preserved_field_hashes["raw_item_data"]) == 64
+    assert set(evidence.preserved_field_hashes) == {"non_membership", "source"}
+    assert len(evidence.preserved_field_hashes["non_membership"]) == 64
     expected_source = normalize_paper(
         adapter.read_items(ReadItemsRequest(("ITEM01",)))[0].normalization_mapping(),
         run_date=date(2026, 8, 11),
