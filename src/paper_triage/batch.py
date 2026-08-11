@@ -134,29 +134,10 @@ def execute_persisted_preview(
                 item.preview_item_version if verified_version is None else verified_version
             )
             if prior is not None and prior.state in {"attempted", "uncertain"}:
-                # Recovery sees the post-write version, so it cannot be
-                # compared to the pre-write optimistic-lock version.  It does
-                # still require the original source identity for a first
-                # operation before accepting a read-back as proof.
-                if verified_version is None and (
-                    evidence.preserved_field_hashes.get("source") != item.source_fingerprint
-                ):
-                    ledger.record_operation(
-                        authorization_id,
-                        operation.operation_id,
-                        "skipped_stale",
-                        prior.expected_version,
-                        evidence.item_version,
-                    )
-                    _abort_remaining(
-                        preview,
-                        ledger,
-                        authorization_id,
-                        item.item_key,
-                        operation.operation_id,
-                        expected_version=prior.expected_version,
-                    )
-                    raise ValueError("fresh item snapshot does not match the approved preview")
+                # Recovery sees the post-write version, so it cannot use the
+                # original optimistic-lock comparison.  It must instead prove
+                # that the fresh snapshot is the exact approved membership
+                # delta from the durable pre-write evidence.
                 try:
                     _recover_attempted_operation(
                         ledger,
@@ -315,9 +296,31 @@ def _latest_operation_entry(
     return next((entry for entry in reversed(entries) if entry.operation_id == operation_id), None)
 
 
-def _desired_membership(evidence: AttemptEvidence, operation: PlannedOperation) -> bool:
-    values = evidence.tags if operation.resource_type == "tag" else evidence.collection_keys
-    return (operation.target in values) == operation.after_present
+def _is_exact_recovery_diff(
+    before: AttemptEvidence, after: AttemptEvidence, operation: PlannedOperation
+) -> bool:
+    """Accept recovery only when evidence proves the sole approved delta.
+
+    Membership snapshots prove the requested tag/collection delta precisely;
+    the complete safe fingerprint map prevents an unrelated data-field edit
+    from being mistaken for a successful mutation.  A port that cannot provide
+    stable target-excluded safe fingerprints is therefore conservatively
+    unrecoverable rather than allowed to replay or claim success.
+    """
+    before_tags = set(before.tags)
+    before_collections = set(before.collection_keys)
+    expected_tags = before_tags.copy()
+    expected_collections = before_collections.copy()
+    target_set = expected_tags if operation.resource_type == "tag" else expected_collections
+    if operation.after_present:
+        target_set.add(operation.target)
+    else:
+        target_set.discard(operation.target)
+    return (
+        set(after.tags) == expected_tags
+        and set(after.collection_keys) == expected_collections
+        and after.preserved_field_hashes == before.preserved_field_hashes
+    )
 
 
 def _recover_attempted_operation(
@@ -328,7 +331,12 @@ def _recover_attempted_operation(
     attempted_version: int,
 ) -> None:
     """Resolve a possibly-issued write with read-back, never a replay."""
-    if evidence.item_version > attempted_version and _desired_membership(evidence, operation):
+    attempted_evidence = ledger.attempt_evidence_for(authorization_id, operation.operation_id)
+    if attempted_evidence is None:
+        raise ValueError("attempted operation has no durable attempt evidence")
+    if evidence.item_version > attempted_version and _is_exact_recovery_diff(
+        attempted_evidence, evidence, operation
+    ):
         ledger.record_operation(
             authorization_id,
             operation.operation_id,
@@ -337,9 +345,6 @@ def _recover_attempted_operation(
             evidence.item_version,
         )
         if operation.action == "add":
-            attempted_evidence = ledger.attempt_evidence_for(authorization_id, operation.operation_id)
-            if attempted_evidence is None:
-                raise ValueError("attempted operation has no durable attempt evidence")
             ledger.record_managed_provenance(
                 authorization_id,
                 attempted_evidence,

@@ -69,6 +69,7 @@ class ApprovedMutation(BaseModel):
     target: str = Field(min_length=1)
     expected_present: bool
     desired_present: bool
+    ownership_mutation_id: str | None = Field(default=None, min_length=1)
     # Only a first operation has a fixed version in the preview.  Later
     # operations are bound to the verified result of their predecessor.
     expected_version: int | None = Field(default=None, ge=0)
@@ -175,6 +176,7 @@ class ReleaseAuthorization(BaseModel):
         target: str,
         expected_present: bool,
         desired_present: bool,
+        ownership_mutation_id: str | None,
     ) -> bool:
         """Check the complete reviewed identity, never a global target alone."""
         if not self.is_issued:
@@ -189,6 +191,7 @@ class ReleaseAuthorization(BaseModel):
                 target=target,
                 expected_present=expected_present,
                 desired_present=desired_present,
+                ownership_mutation_id=ownership_mutation_id,
             )
         except ValidationError:
             return False
@@ -247,6 +250,7 @@ def _snapshot_allowlists(
                     target=operation.target,
                     expected_present=operation.before_present,
                     desired_present=operation.after_present,
+                    ownership_mutation_id=operation.ownership_mutation_id,
                     expected_version=(
                         operation.version_precondition.version
                         if isinstance(operation.version_precondition, PreviewVersion)

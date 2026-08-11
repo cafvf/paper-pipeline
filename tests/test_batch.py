@@ -283,6 +283,68 @@ def test_executor_recovers_uncertain_write_by_fresh_readback_without_replaying_i
     assert [entry.state for entry in first_entries] == ["planned", "attempted", "uncertain", "verified"]
 
 
+def test_executor_refuses_ambiguous_recovery_with_unrelated_safe_fingerprint_change(
+    tmp_path: Path,
+) -> None:
+    preview, request = _batch_preview()
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_preview_request(preview, request)
+
+    class RawEvidenceFailPort(LocalBatchPort):
+        def capture_attempt_evidence(self, **kwargs: object) -> AttemptEvidence:
+            evidence = super().capture_attempt_evidence(**kwargs)
+            return evidence.model_copy(
+                update={
+                    "preserved_field_hashes": {
+                        "source": "a" * 64,
+                        "raw_item_data": "a" * 64,
+                    }
+                }
+            )
+
+    with pytest.raises(RuntimeError, match="simulated transport failure"):
+        execute_persisted_preview(
+            preview.plan_hash, ledger, RawEvidenceFailPort([1] * 10, fail_write=True)
+        )
+
+    class AmbiguousRecoveryPort(LocalBatchPort):
+        def __init__(self) -> None:
+            super().__init__([2])
+
+        def capture_attempt_evidence(self, **kwargs: object) -> AttemptEvidence:
+            evidence = super().capture_attempt_evidence(**kwargs)
+            return evidence.model_copy(
+                update={
+                    "tags": ("#topic-0",),
+                    "preserved_field_hashes": {
+                        "source": "a" * 64,
+                        "raw_item_data": "b" * 64,
+                    },
+                }
+            )
+
+    recovery_port = AmbiguousRecoveryPort()
+    with pytest.raises(ValueError, match="cannot be verified"):
+        execute_persisted_preview(preview.plan_hash, ledger, recovery_port)
+
+    operation = preview.items[0].operations[0]
+    states = _latest_states(ledger, request.approval.approval_id)
+    assert recovery_port.mutation_calls == 0
+    assert states[operation.operation_id] == "failed"
+    assert ledger.managed_provenance_for(
+        operation.operation_id,
+        item_key=preview.items[0].item_key,
+        resource=operation.resource_type,
+        target=operation.target,
+        expected_version=2,
+    ) is None
+    assert all(
+        states[later.operation_id] == "aborted"
+        for item in preview.items[1:]
+        for later in item.operations
+    )
+
+
 def _two_operation_preview() -> tuple[PreviewPlan, ApplyRequest]:
     items: list[PlannedItem] = []
     for number in range(10):

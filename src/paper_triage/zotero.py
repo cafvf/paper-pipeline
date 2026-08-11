@@ -10,12 +10,12 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from http.client import HTTPMessage
-from typing import IO, TYPE_CHECKING, Any, Literal, Protocol, Self, cast
+from typing import IO, Any, Literal, Protocol, Self, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from .audit import AttemptEvidence
+from .audit import AttemptEvidence, AuditLedger
 from .normalization import normalize_paper
 from .release_safety import (
     ReleaseAuthorization,
@@ -24,9 +24,6 @@ from .release_safety import (
     ValidationEvidence,
     authorize,
 )
-
-if TYPE_CHECKING:
-    from .audit import AuditLedger
 from .selection import select_first_real_lot
 
 _API_ROOT = "https://api.zotero.org"
@@ -362,6 +359,7 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
         *,
         transport: Transport = _http_get,
         write_transport: WriteTransport = _http_put,
+        ledger: AuditLedger | None = None,
     ) -> None:
         if not authorization.is_issued:
             raise PermissionError(
@@ -370,6 +368,9 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
         super().__init__(config, transport=transport)
         self._write_transport = write_transport
         self._authorization = authorization
+        # A caller-provided provenance DTO is only an ownership-operation
+        # selector.  The durable ledger remains the sole authority for removal.
+        self._ledger = ledger
 
     @classmethod
     def from_persisted_release(
@@ -405,6 +406,7 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
             authorization,
             transport=transport,
             write_transport=write_transport,
+            ledger=ledger,
         )
 
     def mutate_item(self, command: ZoteroMutationCommand) -> ZoteroMutationReceipt:
@@ -419,6 +421,9 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
             target=command.target,
             expected_present=command.expected_present,
             desired_present=command.desired_present,
+            ownership_mutation_id=(
+                command.provenance.operation_id if command.provenance is not None else None
+            ),
         ):
             raise PermissionError(
                 "Zotero mutation is not a complete approved operation bound to the snapshot"
@@ -535,18 +540,23 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
         if command.action == "remove" and (not command.expected_present or command.desired_present):
             raise ValueError("Zotero remove command has inconsistent membership expectation")
 
-    @staticmethod
-    def _validate_removal_provenance(command: ZoteroMutationCommand) -> None:
+    def _validate_removal_provenance(self, command: ZoteroMutationCommand) -> None:
         provenance = command.provenance
         if provenance is None:
             raise PermissionError("Zotero removal requires verified managed provenance")
-        if (
-            provenance.item_key != command.item_key
-            or provenance.resource != command.resource
-            or provenance.target != command.target
-            or provenance.added_version != command.expected_version
-        ):
-            raise ZoteroTransportError("managed provenance is superseded")
+        if self._ledger is None:
+            raise PermissionError("Zotero removal requires ledger-derived managed provenance")
+        owned = self._ledger.managed_provenance_for(
+            provenance.operation_id,
+            item_key=command.item_key,
+            resource=command.resource,
+            target=command.target,
+            expected_version=command.expected_version,
+        )
+        if owned is None or self._ledger.attempt_evidence_for(
+            owned.authorization_id, owned.operation_id
+        ) is None:
+            raise PermissionError("Zotero removal has no ledger-derived managed provenance")
 
     @staticmethod
     def _set_membership(payload: dict[str, object], command: ZoteroMutationCommand) -> None:

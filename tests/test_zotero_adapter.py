@@ -32,6 +32,7 @@ from paper_triage.release_safety import (
 from paper_triage.zotero import (
     DryRunBatch,
     FakeZoteroPort,
+    ManagedMutationProvenance,
     ReadCollectionItemsRequest,
     ReadCollectionTreeRequest,
     ReadItemsRequest,
@@ -272,7 +273,7 @@ class InMemoryZoteroHttp:
 
 
 def _release_artifacts(
-    *, resource: str = "tag", action: str = "add"
+    *, resource: str = "tag", action: str = "add", ownership_mutation_id: str | None = None
 ) -> tuple[PreviewPlan, ApplyRequest, ValidationEvidence]:
     target = "#managed" if resource == "tag" else "STAGEKEY"
     items = tuple(
@@ -290,7 +291,9 @@ def _release_artifacts(
                     before_present=action == "remove",
                     after_present=action == "add",
                     version_precondition=PreviewVersion(version=1),
-                    ownership_mutation_id=("owned-add" if action == "remove" else None),
+                    ownership_mutation_id=(
+                        (ownership_mutation_id or "owned-add") if action == "remove" else None
+                    ),
                     reason_codes=(f"test-{number}",),
                 ),
             ),
@@ -330,8 +333,12 @@ def _release_artifacts(
     return preview, request, validation_evidence
 
 
-def _live_authorization(*, resource: str = "tag", action: str = "add") -> ReleaseAuthorization:
-    preview, request, validation_evidence = _release_artifacts(resource=resource, action=action)
+def _live_authorization(
+    *, resource: str = "tag", action: str = "add", ownership_mutation_id: str | None = None
+) -> ReleaseAuthorization:
+    preview, request, validation_evidence = _release_artifacts(
+        resource=resource, action=action, ownership_mutation_id=ownership_mutation_id
+    )
     return authorize(
         ReleaseRequest(
             mode=ReleaseMode.LIVE,
@@ -344,13 +351,21 @@ def _live_authorization(*, resource: str = "tag", action: str = "add") -> Releas
 
 
 def _managed_adapter(
-    fake: InMemoryZoteroHttp, *, resource: str = "tag", action: str = "add"
+    fake: InMemoryZoteroHttp,
+    *,
+    resource: str = "tag",
+    action: str = "add",
+    ledger: AuditLedger | None = None,
+    ownership_mutation_id: str | None = None,
 ) -> ZoteroHttpMutationAdapter:
     return ZoteroHttpMutationAdapter(
         ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
-        _live_authorization(resource=resource, action=action),
+        _live_authorization(
+            resource=resource, action=action, ownership_mutation_id=ownership_mutation_id
+        ),
         transport=fake.read,
         write_transport=fake.write,
+        ledger=ledger,
     )
 
 
@@ -358,10 +373,13 @@ def _approved_command(
     *,
     resource: str = "tag",
     action: str = "add",
+    ownership_mutation_id: str | None = None,
     item_key: str = "ITEM01",
     expected_version: int = 1,
 ) -> ZoteroMutationCommand:
-    preview, _request, _validation = _release_artifacts(resource=resource, action=action)
+    preview, _request, _validation = _release_artifacts(
+        resource=resource, action=action, ownership_mutation_id=ownership_mutation_id
+    )
     item = next(value for value in preview.items if value.item_key == item_key)
     operation = item.operations[0]
     return ZoteroMutationCommand(
@@ -422,10 +440,53 @@ def test_managed_http_mutation_rejects_changes_to_unrelated_item_data() -> None:
 
 def test_managed_http_mutation_rejects_unmanaged_removal_before_any_write() -> None:
     fake = InMemoryZoteroHttp(_item("ITEM01", tags=["#human", "#managed"]))
-    adapter = _managed_adapter(fake, action="remove")
+    adapter = _managed_adapter(fake, action="remove", ownership_mutation_id="a" * 64)
 
-    with pytest.raises(PermissionError, match="managed provenance"):
-        adapter.mutate_item(_approved_command(action="remove"))
+    forged = ManagedMutationProvenance(
+        operation_id="a" * 64,
+        idempotency_key="b" * 64,
+        item_key="ITEM01",
+        resource="tag",
+        target="#managed",
+        added_version=1,
+    )
+
+    with pytest.raises(PermissionError, match="ledger-derived"):
+        adapter.mutate_item(
+            replace(
+                _approved_command(action="remove", ownership_mutation_id="a" * 64),
+                provenance=forged,
+            )
+        )
+
+    assert fake.writes == []
+
+
+def test_managed_http_mutation_rejects_forged_provenance_not_present_in_audit_ledger(
+    tmp_path: Path,
+) -> None:
+    """Fake HTTP must not receive a removal when the ledger has no ownership row."""
+    fake = InMemoryZoteroHttp(_item("ITEM01", tags=["#human", "#managed"]))
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    adapter = _managed_adapter(
+        fake, action="remove", ledger=ledger, ownership_mutation_id="a" * 64
+    )
+    forged = ManagedMutationProvenance(
+        operation_id="a" * 64,
+        idempotency_key="b" * 64,
+        item_key="ITEM01",
+        resource="tag",
+        target="#managed",
+        added_version=1,
+    )
+
+    with pytest.raises(PermissionError, match="ledger-derived"):
+        adapter.mutate_item(
+            replace(
+                _approved_command(action="remove", ownership_mutation_id="a" * 64),
+                provenance=forged,
+            )
+        )
 
     assert fake.writes == []
 
