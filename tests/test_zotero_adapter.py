@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import tempfile
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, date, datetime
@@ -357,16 +358,38 @@ def _managed_adapter(
     action: str = "add",
     ledger: AuditLedger | None = None,
     ownership_mutation_id: str | None = None,
+    durable_attempt: bool = False,
 ) -> ZoteroHttpMutationAdapter:
-    return ZoteroHttpMutationAdapter(
+    preview, request, validation_evidence = _release_artifacts(
+        resource=resource, action=action, ownership_mutation_id=ownership_mutation_id
+    )
+    temporary_directory = tempfile.TemporaryDirectory()
+    ledger = ledger or AuditLedger(Path(temporary_directory.name) / "audit.sqlite3")
+    ledger.persist_preview_request(preview, request)
+    authorization_id = ledger.persist_preview_authorization(preview.plan_hash)
+    adapter = ZoteroHttpMutationAdapter.from_persisted_release(
         ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
-        _live_authorization(
-            resource=resource, action=action, ownership_mutation_id=ownership_mutation_id
-        ),
+        ledger,
+        preview.plan_hash,
+        human_approved=True,
+        validation_evidence=validation_evidence,
         transport=fake.read,
         write_transport=fake.write,
-        ledger=ledger,
     )
+    if durable_attempt:
+        command = _approved_command(
+            resource=resource, action=action, ownership_mutation_id=ownership_mutation_id
+        )
+        evidence = adapter.capture_attempt_evidence(
+            operation_id=command.operation_id,
+            idempotency_key=command.idempotency_key,
+            item_key=command.item_key,
+            run_date=preview.run_date,
+        )
+        ledger.record_attempt(authorization_id, evidence)
+    # Keep the temporary backing store alive for this adapter's test lifetime.
+    adapter._test_temporary_directory = temporary_directory  # type: ignore[attr-defined]
+    return adapter
 
 
 def _approved_command(
@@ -406,9 +429,11 @@ def test_managed_http_mutation_requires_authorization_and_verifies_exact_diff() 
             ReleaseAuthorization(allowed=False, reason="dry run"),
             transport=fake.read,
             write_transport=fake.write,
+            ledger=AuditLedger(Path(tempfile.mkdtemp()) / "audit.sqlite3"),
+            authorization_id="test-authorization",
         )
 
-    adapter = _managed_adapter(fake)
+    adapter = _managed_adapter(fake, durable_attempt=True)
     receipt = adapter.mutate_item(_approved_command())
 
     assert receipt.accepted_version == 2
@@ -432,7 +457,7 @@ def test_managed_http_mutation_rejects_changes_to_unrelated_item_data() -> None:
             return status, request_id
 
     fake = TamperingZoteroHttp(_item("ITEM01", tags=["#human"]))
-    adapter = _managed_adapter(fake)
+    adapter = _managed_adapter(fake, durable_attempt=True)
 
     with pytest.raises(ZoteroTransportError, match="ZOTERO_EXACT_DIFF_VIOLATION"):
         adapter.mutate_item(_approved_command())
@@ -440,7 +465,9 @@ def test_managed_http_mutation_rejects_changes_to_unrelated_item_data() -> None:
 
 def test_managed_http_mutation_rejects_unmanaged_removal_before_any_write() -> None:
     fake = InMemoryZoteroHttp(_item("ITEM01", tags=["#human", "#managed"]))
-    adapter = _managed_adapter(fake, action="remove", ownership_mutation_id="a" * 64)
+    adapter = _managed_adapter(
+        fake, action="remove", ownership_mutation_id="a" * 64, durable_attempt=True
+    )
 
     forged = ManagedMutationProvenance(
         operation_id="a" * 64,
@@ -469,7 +496,11 @@ def test_managed_http_mutation_rejects_forged_provenance_not_present_in_audit_le
     fake = InMemoryZoteroHttp(_item("ITEM01", tags=["#human", "#managed"]))
     ledger = AuditLedger(tmp_path / "audit.sqlite3")
     adapter = _managed_adapter(
-        fake, action="remove", ledger=ledger, ownership_mutation_id="a" * 64
+        fake,
+        action="remove",
+        ledger=ledger,
+        ownership_mutation_id="a" * 64,
+        durable_attempt=True,
     )
     forged = ManagedMutationProvenance(
         operation_id="a" * 64,
@@ -480,7 +511,7 @@ def test_managed_http_mutation_rejects_forged_provenance_not_present_in_audit_le
         added_version=1,
     )
 
-    with pytest.raises(PermissionError, match="ledger authorization"):
+    with pytest.raises(PermissionError, match="ledger-derived"):
         adapter.mutate_item(
             replace(
                 _approved_command(action="remove", ownership_mutation_id="a" * 64),
@@ -642,7 +673,23 @@ def test_mutation_adapter_rejects_serialized_or_hand_built_capabilities() -> Non
             forged,
             transport=fake.read,
             write_transport=fake.write,
+            ledger=AuditLedger(Path(tempfile.mkdtemp()) / "audit.sqlite3"),
+            authorization_id="test-authorization",
         )
+    assert fake.writes == []
+
+
+def test_mutation_adapter_rejects_issued_capability_without_persisted_ledger_binding() -> None:
+    fake = InMemoryZoteroHttp(_item("ITEM01"))
+
+    with pytest.raises(PermissionError, match="persisted ledger authorization"):
+        ZoteroHttpMutationAdapter(
+            ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
+            _live_authorization(),
+            transport=fake.read,
+            write_transport=fake.write,
+        )
+
     assert fake.writes == []
 
 

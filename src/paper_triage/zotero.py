@@ -366,6 +366,8 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
             raise PermissionError(
                 "ReleaseAuthorization must be an issued, snapshot-bound live capability"
             )
+        if ledger is None or not authorization_id:
+            raise PermissionError("Zotero mutation requires a persisted ledger authorization")
         super().__init__(config, transport=transport)
         self._write_transport = write_transport
         self._authorization = authorization
@@ -588,10 +590,8 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
         write before the canonical batch executor has committed ``attempted``.
         Standalone adapters retain their explicitly narrower, no-ledger use.
         """
-        if self._ledger is None:
-            return
-        if self._authorization_id is None:
-            raise PermissionError("Zotero mutation requires a ledger authorization")
+        if self._ledger is None or self._authorization_id is None:
+            raise PermissionError("Zotero mutation requires a persisted ledger authorization")
         evidence = self._ledger.attempt_evidence_for(
             self._authorization_id, command.operation_id
         )
