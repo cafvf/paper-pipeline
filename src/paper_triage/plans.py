@@ -220,7 +220,9 @@ class PreviewPlan(BaseModel):
             raise ValueError("selected item keys must exactly match the ten planned items")
         if item_keys != tuple(sorted(item_keys)):
             raise ValueError("planned items must be sorted by item key")
-        if self.reviewed_diff_projection != self.reviewed_diff_for(self.items):
+        if canonical_sha256(self.reviewed_diff_projection) != canonical_sha256(
+            self.reviewed_diff_for(self.items)
+        ):
             raise ValueError("reviewed diff projection does not exactly match planned operations")
         expected = self.plan_hash_for(**self.model_dump(exclude={"plan_hash"}, mode="python"))
         if self.plan_hash != expected:

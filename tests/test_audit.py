@@ -5,6 +5,7 @@ import json
 import socket
 import sqlite3
 import stat
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,16 @@ from paper_triage.audit import (
     canonical_plan_hash,
     canonical_reviewed_diff_hash,
 )
+from paper_triage.plans import (
+    ApplyRequest,
+    ApprovalEvidence,
+    PlannedItem,
+    PlannedOperation,
+    PreviewPlan,
+    PreviewVersion,
+    Snapshot,
+    canonical_sha256,
+)
 
 
 def plan() -> MutationPlan:
@@ -39,6 +50,43 @@ def plan() -> MutationPlan:
             Mutation(kind="collection", target="to-look", action="add"),
         ),
     )
+
+
+def _batch_preview() -> tuple[PreviewPlan, ApplyRequest]:
+    items = []
+    for number in range(10):
+        operation = PlannedOperation.build(sequence=0, resource_type="tag", action="add", target=f"#topic-{number}", before_present=False, after_present=True, version_precondition=PreviewVersion(version=1))
+        items.append(PlannedItem(item_key=f"ITEM{number:02d}", source_fingerprint="a" * 64, preview_item_version=1, classification_projection={}, operations=(operation,)))
+    frozen_items = tuple(items)
+    snapshot = Snapshot(value={}, digest=canonical_sha256({}))
+    payload = {
+        "preview_id": "batch-preview",
+        "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+        "run_date": date(2026, 1, 1),
+        "selected_item_keys": tuple(item.item_key for item in frozen_items),
+        "library_scope": {},
+        "config_snapshot": snapshot,
+        "collection_snapshot": snapshot,
+        "project_profile_snapshot": snapshot,
+        "ruleset_snapshot": snapshot,
+        "taxonomy_snapshot": snapshot,
+        "items": frozen_items,
+        "reviewed_diff_projection": PreviewPlan.reviewed_diff_for(frozen_items),
+    }
+    preview = PreviewPlan(**payload, plan_hash=PreviewPlan.plan_hash_for(**payload))
+    operation_ids = tuple(operation.operation_id for item in preview.items for operation in item.operations)
+    evidence = ApprovalEvidence.create(approval_id="batch-approval", approved_plan_hash=preview.plan_hash, approved_at=datetime(2026, 1, 1, tzinfo=UTC), approved_item_keys=preview.selected_item_keys, reviewed_operation_ids=operation_ids, reviewed_diff_hash=preview.reviewed_diff_hash)
+    return preview, ApplyRequest(preview_id=preview.preview_id, plan_hash=preview.plan_hash, approval=evidence)
+
+
+def test_canonical_ten_item_preview_is_persisted_and_revalidated(tmp_path: Path) -> None:
+    preview, request = _batch_preview()
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    assert ledger.persist_preview_request(preview, request)
+    assert not ledger.persist_preview_request(preview, request)
+    loaded_preview, loaded_request = ledger.load_preview_request(preview.plan_hash)
+    assert loaded_preview.plan_hash == preview.plan_hash
+    assert loaded_request == request
 
 
 def test_plan_json_round_trip_and_hash_are_canonical() -> None:

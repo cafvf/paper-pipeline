@@ -13,6 +13,8 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .plans import ApplyRequest, PreviewPlan
+
 
 class Mutation(BaseModel):
     """One proposed local mutation; it carries data, never connector credentials."""
@@ -228,6 +230,11 @@ class AuditLedger:
         self._connection.execute("PRAGMA synchronous=FULL")
         self._connection.execute("PRAGMA foreign_keys=ON")
         self._connection.execute(
+            "CREATE TABLE IF NOT EXISTS canonical_preview "
+            "(plan_hash TEXT PRIMARY KEY, preview_id TEXT NOT NULL UNIQUE, plan_json TEXT NOT NULL, "
+            "apply_request_json TEXT NOT NULL, approval_digest TEXT NOT NULL UNIQUE)"
+        )
+        self._connection.execute(
             "CREATE TABLE IF NOT EXISTS apply_authorization "
             "(authorization_id TEXT PRIMARY KEY, plan_hash TEXT NOT NULL UNIQUE, "
             "reviewed_diff_hash TEXT NOT NULL, approved_item_keys_json TEXT NOT NULL, "
@@ -280,6 +287,53 @@ class AuditLedger:
     @property
     def journal_mode(self) -> str:
         return str(self._connection.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+
+    def persist_preview_request(self, plan: PreviewPlan, request: ApplyRequest) -> bool:
+        """Durably bind an exact ten-item preview to its immutable apply request.
+
+        This boundary is intentionally separate from the legacy single-item
+        ``MutationPlan`` ledger. A later batch executor must load this persisted
+        pair rather than trusting an in-memory preview or approval.
+        """
+        request.validates(plan)
+        row = (
+            plan.plan_hash,
+            plan.preview_id,
+            plan.model_dump_json(),
+            request.model_dump_json(),
+            request.approval.confirmation_digest,
+        )
+        existing = self._connection.execute(
+            "SELECT plan_hash, preview_id, plan_json, apply_request_json, approval_digest "
+            "FROM canonical_preview WHERE plan_hash = ?",
+            (plan.plan_hash,),
+        ).fetchone()
+        if existing is not None:
+            if existing != row:
+                raise ValueError("persisted preview conflicts with immutable approval")
+            return False
+        with self._connection:
+            self._connection.execute(
+                "INSERT INTO canonical_preview(plan_hash, preview_id, plan_json, apply_request_json, approval_digest) "
+                "VALUES (?, ?, ?, ?, ?)",
+                row,
+            )
+        return True
+
+    def load_preview_request(self, plan_hash: str) -> tuple[PreviewPlan, ApplyRequest]:
+        """Load and revalidate the durable authority pair before a batch apply."""
+        row = self._connection.execute(
+            "SELECT plan_json, apply_request_json FROM canonical_preview WHERE plan_hash = ?",
+            (plan_hash,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("canonical preview is not persisted")
+        plan = PreviewPlan.model_validate_json(row[0])
+        request = ApplyRequest.model_validate_json(row[1])
+        request.validates(plan)
+        if plan.plan_hash != plan_hash:
+            raise ValueError("persisted preview hash is inconsistent")
+        return plan, request
 
     def persist_authorization_and_plan(
         self, authorization: ApplyAuthorization, mutation_plan: MutationPlan
