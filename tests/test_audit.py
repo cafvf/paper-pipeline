@@ -863,3 +863,32 @@ def test_prepare_binds_dependent_planned_operation_without_rewriting_authority(t
     assert [entry.state for entry in ledger.operation_entries_for(approved.authorization_id) if entry.operation_id == operation_id] == [
         "planned", "prepared", "attempted"
     ]
+
+
+def test_authorization_match_binds_id_to_exact_plan_and_human_digest(tmp_path: Path) -> None:
+    first = plan()
+    # The operation IDs deliberately overlap: they derive from the same diff,
+    # while the source fingerprint gives this preview a different plan hash.
+    second = first.model_copy(update={"source_fingerprint": "b" * 64})
+    first_authorization = authorization(first)
+    second_authorization = ApplyAuthorization.for_plan(second, authorization_id="approval-002")
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_authorization_and_plan(first_authorization, first)
+    ledger.persist_authorization_and_plan(second_authorization, second)
+
+    assert ledger.authorization_matches(
+        first_authorization.authorization_id,
+        plan_hash=first.plan_hash,
+        approval_confirmation_digest=first_authorization.confirmation_digest,
+        reviewed_diff_hash=first_authorization.reviewed_diff_hash,
+    )
+    assert not ledger.authorization_matches(
+        first_authorization.authorization_id,
+        plan_hash=second.plan_hash,
+        approval_confirmation_digest=first_authorization.confirmation_digest,
+    )
+    assert not ledger.authorization_matches(
+        first_authorization.authorization_id,
+        plan_hash=first.plan_hash,
+        approval_confirmation_digest=second_authorization.confirmation_digest,
+    )

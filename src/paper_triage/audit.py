@@ -501,6 +501,30 @@ class AuditLedger:
             self._ensure_authorized_operations(authorization.authorization_id, operations)
         return authorization.authorization_id
 
+    def authorization_matches(
+        self,
+        authorization_id: str,
+        *,
+        plan_hash: str,
+        approval_confirmation_digest: str,
+        reviewed_diff_hash: str | None = None,
+    ) -> bool:
+        """Return whether an adapter capability names this exact approved plan.
+
+        Operation IDs are intentionally not considered sufficient: the same
+        semantic operation may appear in more than one preview.  Callers that
+        receive an authorization ID from another boundary must bind it to both
+        the persisted plan hash and the human approval digest before writing.
+        """
+        row = self._connection.execute(
+            "SELECT plan_hash, confirmation_digest, reviewed_diff_hash "
+            "FROM apply_authorization WHERE authorization_id = ?",
+            (authorization_id,),
+        ).fetchone()
+        if row is None or row[0] != plan_hash or row[1] != approval_confirmation_digest:
+            return False
+        return reviewed_diff_hash is None or row[2] == reviewed_diff_hash
+
     def persist_authorization_and_plan(
         self, authorization: ApplyAuthorization, mutation_plan: MutationPlan
     ) -> bool:
