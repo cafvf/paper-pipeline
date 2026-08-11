@@ -15,6 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .audit import AttemptEvidence
 from .normalization import normalize_paper
 from .release_safety import (
     ReleaseAuthorization,
@@ -408,8 +409,20 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
 
     def mutate_item(self, command: ZoteroMutationCommand) -> ZoteroMutationReceipt:
         self._validate_command(command)
-        if not self._authorization.permits_target(command.resource, command.target):
-            raise PermissionError("Zotero mutation target is not in the snapshot allowlist bound to approved plan")
+        if not self._authorization.permits_operation(
+            operation_id=command.operation_id,
+            idempotency_key=command.idempotency_key,
+            item_key=command.item_key,
+            expected_version=command.expected_version,
+            resource=command.resource,
+            action=command.action,
+            target=command.target,
+            expected_present=command.expected_present,
+            desired_present=command.desired_present,
+        ):
+            raise PermissionError(
+                "Zotero mutation is not a complete approved operation bound to the snapshot"
+            )
         before_row = self._read_single_raw_item(command.item_key)
         before = _snapshot_from_response(self._config.library_id, before_row)
         if before.item_version != command.expected_version:
@@ -456,6 +469,36 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
         )
         return ZoteroMutationReceipt(
             command.item_key, after.item_version, request_id, provenance=provenance
+        )
+
+    def capture_attempt_evidence(
+        self, *, operation_id: str, idempotency_key: str, item_key: str, run_date: date
+    ) -> AttemptEvidence:
+        """Return a fresh, complete, credential-free snapshot before a write.
+
+        The canonical batch executor persists this value before calling
+        ``mutate_item``.  Reading through the existing GET-only path gives the
+        evidence the same origin allowlist, sanitization, and bounded retry
+        behavior as all other adapter rereads.
+        """
+        snapshot = _snapshot_from_response(
+            self._config.library_id, self._read_single_raw_item(item_key)
+        )
+        if snapshot.item_key != item_key:
+            raise ZoteroTransportError("Zotero item reread returned an unexpected item")
+        return AttemptEvidence(
+            operation_id=operation_id,
+            idempotency_key=idempotency_key,
+            item_key=snapshot.item_key,
+            item_version=snapshot.item_version,
+            tags=tuple(sorted(snapshot.tags)),
+            collection_keys=tuple(sorted(snapshot.collections)),
+            preserved_field_hashes={
+                "source": normalize_paper(
+                    snapshot.normalization_mapping(), run_date=run_date
+                ).source_fingerprint,
+                "raw_item_data": snapshot.preserved_fields_hash,
+            },
         )
 
     def _read_single_raw_item(self, item_key: str) -> dict[str, object]:

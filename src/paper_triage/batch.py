@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, replace
+from datetime import date
 from typing import Protocol
 
-from .audit import AttemptEvidence, AuditLedger
+from .audit import AttemptEvidence, AuditLedger, OperationLedgerEntry
 from .plans import ApplyRequest, PlannedItem, PlannedOperation, PreviewPlan
 from .zotero import ManagedMutationProvenance, ZoteroMutationCommand, ZoteroMutationReceipt
 
@@ -22,7 +23,7 @@ class BatchMutationPort(Protocol):
     """The preflight/write capability needed by the canonical batch executor."""
 
     def capture_attempt_evidence(
-        self, *, operation_id: str, idempotency_key: str, item_key: str
+        self, *, operation_id: str, idempotency_key: str, item_key: str, run_date: date
     ) -> AttemptEvidence:
         """Read a fresh, complete item snapshot before a possible external write."""
 
@@ -105,21 +106,100 @@ def execute_persisted_preview(
         verified_version: int | None = None
         for operation in item.operations:
             idempotency_key = _idempotency_key(preview, operation)
+            prior = _latest_operation_entry(ledger, authorization_id, operation.operation_id)
+
+            # A completed operation is immutable history.  Reapplying the same
+            # approved plan must neither re-read nor replay its external write.
+            if prior is not None and prior.state == "verified":
+                if prior.observed_version is None:
+                    _abort_remaining(
+                        preview, ledger, authorization_id, item.item_key, operation.operation_id,
+                        expected_version=item.preview_item_version,
+                    )
+                    raise ValueError("verified operation has no observed version")
+                verified_version = prior.observed_version
+                continue
+            if prior is not None and prior.state in {"failed", "skipped_stale", "aborted"}:
+                raise ValueError("persisted batch execution is already terminal")
+
             evidence = port.capture_attempt_evidence(
                 operation_id=operation.operation_id,
                 idempotency_key=idempotency_key,
                 item_key=item.item_key,
+                run_date=preview.run_date,
             )
             _validate_attempt_evidence(evidence, item, operation, idempotency_key)
-            if verified_version is not None and evidence.item_version != verified_version:
+
+            expected_version = (
+                item.preview_item_version if verified_version is None else verified_version
+            )
+            if prior is not None and prior.state in {"attempted", "uncertain"}:
+                # Recovery sees the post-write version, so it cannot be
+                # compared to the pre-write optimistic-lock version.  It does
+                # still require the original source identity for a first
+                # operation before accepting a read-back as proof.
+                if verified_version is None and (
+                    evidence.preserved_field_hashes.get("source") != item.source_fingerprint
+                ):
+                    ledger.record_operation(
+                        authorization_id,
+                        operation.operation_id,
+                        "skipped_stale",
+                        prior.expected_version,
+                        evidence.item_version,
+                    )
+                    _abort_remaining(
+                        preview,
+                        ledger,
+                        authorization_id,
+                        item.item_key,
+                        operation.operation_id,
+                        expected_version=prior.expected_version,
+                    )
+                    raise ValueError("fresh item snapshot does not match the approved preview")
+                try:
+                    _recover_attempted_operation(
+                        ledger,
+                        authorization_id,
+                        operation,
+                        evidence,
+                        prior.expected_version,
+                    )
+                except ValueError:
+                    _abort_remaining(
+                        preview,
+                        ledger,
+                        authorization_id,
+                        item.item_key,
+                        operation.operation_id,
+                        expected_version=prior.expected_version,
+                    )
+                    raise
+                verified_version = evidence.item_version
+                continue
+
+            if not _snapshot_matches_expected(
+                evidence,
+                item,
+                expected_version=expected_version,
+                require_source_fingerprint=verified_version is None,
+            ):
                 ledger.record_operation(
                     authorization_id,
                     operation.operation_id,
                     "skipped_stale",
-                    verified_version,
+                    expected_version,
                     evidence.item_version,
                 )
-                raise ValueError("fresh item version does not match prior verified operation")
+                _abort_remaining(
+                    preview,
+                    ledger,
+                    authorization_id,
+                    item.item_key,
+                    operation.operation_id,
+                    expected_version=expected_version,
+                )
+                raise ValueError("fresh item snapshot does not match the approved preview")
 
             command = command_for_operation(
                 preview, item, operation, expected_version=evidence.item_version
@@ -127,9 +207,22 @@ def execute_persisted_preview(
             command = _with_ledger_removal_provenance(
                 command, operation, ledger, expected_version=evidence.item_version
             )
-            ledger.record_operation(
-                authorization_id, operation.operation_id, "planned", evidence.item_version
-            )
+            if prior is None:
+                ledger.record_operation(
+                    authorization_id, operation.operation_id, "planned", evidence.item_version
+                )
+            elif prior.state == "planned" and prior.expected_version != evidence.item_version:
+                # Dependent operations are authorized before execution but
+                # receive their concrete optimistic-lock version only after
+                # their predecessor's verified receipt.  This append-only
+                # transition keeps both facts durable without rewriting the
+                # immutable authorization row.
+                ledger.prepare_operation(
+                    authorization_id, operation.operation_id, expected_version=evidence.item_version
+                )
+            elif prior.state not in {"planned", "prepared"}:
+                # Defensive: all legal active and terminal states were handled above.
+                raise ValueError("operation has an illegal persisted execution state")
             # This durable transaction must complete before the port is allowed
             # to issue an external write.
             ledger.record_attempt(authorization_id, evidence)
@@ -144,7 +237,7 @@ def execute_persisted_preview(
                 ledger.record_operation(
                     authorization_id,
                     operation.operation_id,
-                    "aborted",
+                    "failed",
                     evidence.item_version,
                     receipt.accepted_version,
                 )
@@ -193,6 +286,102 @@ def _validate_attempt_evidence(
         or evidence.item_key != item.item_key
     ):
         raise ValueError("fresh attempt evidence does not match the planned operation")
+
+
+def _snapshot_matches_expected(
+    evidence: AttemptEvidence,
+    item: PlannedItem,
+    *,
+    expected_version: int,
+    require_source_fingerprint: bool,
+) -> bool:
+    """Check the fresh optimistic-lock version and the initial source snapshot.
+
+    The preview fingerprint is carried in the write-ahead evidence under the
+    explicit ``source`` key.  Later operations on the same item deliberately
+    compare against the immediately verified version instead: the executor's
+    own preceding membership write necessarily changed the Zotero version.
+    """
+    return evidence.item_version == expected_version and (
+        not require_source_fingerprint
+        or evidence.preserved_field_hashes.get("source") == item.source_fingerprint
+    )
+
+
+def _latest_operation_entry(
+    ledger: AuditLedger, authorization_id: str, operation_id: str
+) -> OperationLedgerEntry | None:
+    entries = ledger.operation_entries_for(authorization_id)
+    return next((entry for entry in reversed(entries) if entry.operation_id == operation_id), None)
+
+
+def _desired_membership(evidence: AttemptEvidence, operation: PlannedOperation) -> bool:
+    values = evidence.tags if operation.resource_type == "tag" else evidence.collection_keys
+    return (operation.target in values) == operation.after_present
+
+
+def _recover_attempted_operation(
+    ledger: AuditLedger,
+    authorization_id: str,
+    operation: PlannedOperation,
+    evidence: AttemptEvidence,
+    attempted_version: int,
+) -> None:
+    """Resolve a possibly-issued write with read-back, never a replay."""
+    if evidence.item_version > attempted_version and _desired_membership(evidence, operation):
+        ledger.record_operation(
+            authorization_id,
+            operation.operation_id,
+            "verified",
+            attempted_version,
+            evidence.item_version,
+        )
+        if operation.action == "add":
+            attempted_evidence = ledger.attempt_evidence_for(authorization_id, operation.operation_id)
+            if attempted_evidence is None:
+                raise ValueError("attempted operation has no durable attempt evidence")
+            ledger.record_managed_provenance(
+                authorization_id,
+                attempted_evidence,
+                resource=operation.resource_type,
+                target=operation.target,
+                verified_version=evidence.item_version,
+            )
+        return
+
+    ledger.record_operation(
+        authorization_id,
+        operation.operation_id,
+        "failed",
+        attempted_version,
+        evidence.item_version,
+    )
+    raise ValueError("interrupted operation cannot be verified by fresh read-back")
+
+
+def _abort_remaining(
+    preview: PreviewPlan,
+    ledger: AuditLedger,
+    authorization_id: str,
+    current_item_key: str,
+    current_operation_id: str,
+    *,
+    expected_version: int,
+) -> None:
+    """Make a stale preflight a fully terminal, non-resumable batch outcome."""
+    current_seen = False
+    for item in preview.items:
+        for operation in item.operations:
+            if not current_seen:
+                current_seen = (
+                    item.item_key == current_item_key and operation.operation_id == current_operation_id
+                )
+                continue
+            prior = _latest_operation_entry(ledger, authorization_id, operation.operation_id)
+            if prior is None or prior.state in {"planned", "prepared"}:
+                ledger.record_operation(
+                    authorization_id, operation.operation_id, "aborted", expected_version
+                )
 
 
 def _with_ledger_removal_provenance(

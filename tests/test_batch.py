@@ -27,6 +27,13 @@ from paper_triage.plans import (
 from paper_triage.zotero import ZoteroMutationCommand, ZoteroMutationReceipt
 
 
+def _latest_states(ledger: AuditLedger, authorization_id: str) -> dict[str, str]:
+    return {
+        entry.operation_id: entry.state
+        for entry in ledger.operation_entries_for(authorization_id)
+    }
+
+
 class LocalBatchPort:
     """In-process fake: its pre-call evidence is the only version source."""
 
@@ -40,8 +47,9 @@ class LocalBatchPort:
         return len(self.commands)
 
     def capture_attempt_evidence(
-        self, *, operation_id: str, idempotency_key: str, item_key: str
+        self, *, operation_id: str, idempotency_key: str, item_key: str, run_date: date
     ) -> AttemptEvidence:
+        del run_date
         return AttemptEvidence(
             operation_id=operation_id,
             idempotency_key=idempotency_key,
@@ -49,7 +57,7 @@ class LocalBatchPort:
             item_version=next(self._versions),
             tags=(),
             collection_keys=(),
-            preserved_field_hashes={"data": "a" * 64},
+            preserved_field_hashes={"source": "a" * 64},
         )
 
     def mutate_item(self, command: ZoteroMutationCommand) -> ZoteroMutationReceipt:
@@ -86,7 +94,7 @@ def test_executor_loads_the_persisted_pair_and_applies_all_ten_items_locally(
     preview, request = _batch_preview()
     ledger = AuditLedger(tmp_path / "audit.sqlite3")
     ledger.persist_preview_request(preview, request)
-    port = LocalBatchPort([7] * 10)
+    port = LocalBatchPort([1] * 10)
     monkeypatch.setattr(
         socket, "create_connection", lambda *args, **kwargs: pytest.fail("network access")
     )
@@ -141,7 +149,7 @@ def test_executor_never_mutates_when_write_ahead_evidence_cannot_persist(tmp_pat
 
     ledger = FailingEvidenceLedger(tmp_path / "audit.sqlite3")
     ledger.persist_preview_request(preview, request)
-    port = LocalBatchPort([4] * 10)
+    port = LocalBatchPort([1] * 10)
 
     with pytest.raises(RuntimeError, match="disk is unavailable"):
         execute_persisted_preview(preview.plan_hash, ledger, port)
@@ -155,12 +163,12 @@ def test_executor_chains_the_receipt_version_for_later_operations_on_one_item(
     preview, request = _two_operation_preview()
     ledger = AuditLedger(tmp_path / "audit.sqlite3")
     ledger.persist_preview_request(preview, request)
-    port = LocalBatchPort([5, 6] + [5] * 9)
+    port = LocalBatchPort([1, 2] + [1] * 9)
 
     result = execute_persisted_preview(preview.plan_hash, ledger, port)
 
     first_item_commands = [command for command in result.commands if command.item_key == "ITEM00"]
-    assert [command.expected_version for command in first_item_commands] == [5, 6]
+    assert [command.expected_version for command in first_item_commands] == [1, 2]
     assert len(result.receipts) == 11
 
 
@@ -168,18 +176,111 @@ def test_executor_marks_the_attempt_uncertain_and_stops_after_write_exception(tm
     preview, request = _batch_preview()
     ledger = AuditLedger(tmp_path / "audit.sqlite3")
     ledger.persist_preview_request(preview, request)
-    port = LocalBatchPort([3] * 10, fail_write=True)
+    port = LocalBatchPort([1] * 10, fail_write=True)
 
     with pytest.raises(RuntimeError, match="simulated transport failure"):
         execute_persisted_preview(preview.plan_hash, ledger, port)
 
     authorization_id = request.approval.approval_id
     assert port.mutation_calls == 1
-    assert [entry.state for entry in ledger.operation_entries_for(authorization_id)] == [
-        "planned",
-        "attempted",
-        "uncertain",
+    assert _latest_states(ledger, authorization_id)[preview.items[0].operations[0].operation_id] == "uncertain"
+
+
+def test_executor_rejects_a_stale_first_snapshot_without_any_write_and_terminalizes_batch(
+    tmp_path: Path,
+) -> None:
+    preview, request = _batch_preview()
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_preview_request(preview, request)
+    port = LocalBatchPort([2])
+
+    with pytest.raises(ValueError, match="does not match the approved preview"):
+        execute_persisted_preview(preview.plan_hash, ledger, port)
+
+    entries = ledger.operation_entries_for(request.approval.approval_id)
+    assert port.mutation_calls == 0
+    states = _latest_states(ledger, request.approval.approval_id)
+    assert states[preview.items[0].operations[0].operation_id] == "skipped_stale"
+    assert all(
+        states[operation.operation_id] == "aborted"
+        for item in preview.items[1:]
+        for operation in item.operations
+    )
+    stale = next(entry for entry in entries if entry.state == "skipped_stale")
+    assert stale.expected_version == 1
+    assert stale.observed_version == 2
+
+
+def test_executor_rejects_a_changed_first_snapshot_fingerprint_without_any_write(
+    tmp_path: Path,
+) -> None:
+    preview, request = _batch_preview()
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_preview_request(preview, request)
+
+    class ChangedFingerprintPort(LocalBatchPort):
+        def capture_attempt_evidence(self, **kwargs: object) -> AttemptEvidence:
+            evidence = super().capture_attempt_evidence(**kwargs)
+            return evidence.model_copy(update={"preserved_field_hashes": {"source": "b" * 64}})
+
+    port = ChangedFingerprintPort([1])
+    with pytest.raises(ValueError, match="does not match the approved preview"):
+        execute_persisted_preview(preview.plan_hash, ledger, port)
+
+    assert port.mutation_calls == 0
+    assert _latest_states(ledger, request.approval.approval_id)[
+        preview.items[0].operations[0].operation_id
+    ] == "skipped_stale"
+
+
+def test_executor_reapply_of_a_completed_batch_is_idempotent_without_port_calls(tmp_path: Path) -> None:
+    preview, request = _batch_preview()
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_preview_request(preview, request)
+    first_port = LocalBatchPort([1] * 10)
+    execute_persisted_preview(preview.plan_hash, ledger, first_port)
+
+    replay_port = LocalBatchPort([])
+    result = execute_persisted_preview(preview.plan_hash, ledger, replay_port)
+
+    assert first_port.mutation_calls == 10
+    assert replay_port.mutation_calls == 0
+    assert result.commands == ()
+    assert result.receipts == ()
+
+
+def test_executor_recovers_uncertain_write_by_fresh_readback_without_replaying_it(
+    tmp_path: Path,
+) -> None:
+    preview, request = _batch_preview()
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_preview_request(preview, request)
+    with pytest.raises(RuntimeError, match="simulated transport failure"):
+        execute_persisted_preview(preview.plan_hash, ledger, LocalBatchPort([1] * 10, fail_write=True))
+
+    class RecoveredFirstPort(LocalBatchPort):
+        def __init__(self) -> None:
+            super().__init__([2] + [1] * 9)
+            self.capture_calls = 0
+
+        def capture_attempt_evidence(self, **kwargs: object) -> AttemptEvidence:
+            evidence = super().capture_attempt_evidence(**kwargs)
+            self.capture_calls += 1
+            if self.capture_calls == 1:
+                return evidence.model_copy(update={"tags": ("#topic-0",)})
+            return evidence
+
+    recovery_port = RecoveredFirstPort()
+    result = execute_persisted_preview(preview.plan_hash, ledger, recovery_port)
+
+    assert recovery_port.mutation_calls == 9
+    assert [command.item_key for command in result.commands] == list(preview.selected_item_keys[1:])
+    first_entries = [
+        entry
+        for entry in ledger.operation_entries_for(request.approval.approval_id)
+        if entry.operation_id == preview.items[0].operations[0].operation_id
     ]
+    assert [entry.state for entry in first_entries] == ["planned", "attempted", "uncertain", "verified"]
 
 
 def _two_operation_preview() -> tuple[PreviewPlan, ApplyRequest]:

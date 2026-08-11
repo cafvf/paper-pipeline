@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -9,6 +11,7 @@ import pytest
 
 from paper_triage.audit import AuditLedger
 from paper_triage.errors import TriageError
+from paper_triage.normalization import normalize_paper
 from paper_triage.plans import (
     ApplyRequest,
     ApprovalEvidence,
@@ -29,7 +32,6 @@ from paper_triage.release_safety import (
 from paper_triage.zotero import (
     DryRunBatch,
     FakeZoteroPort,
-    ManagedMutationProvenance,
     ReadCollectionItemsRequest,
     ReadCollectionTreeRequest,
     ReadItemsRequest,
@@ -270,7 +272,7 @@ class InMemoryZoteroHttp:
 
 
 def _release_artifacts(
-    *, resource: str = "tag"
+    *, resource: str = "tag", action: str = "add"
 ) -> tuple[PreviewPlan, ApplyRequest, ValidationEvidence]:
     target = "#managed" if resource == "tag" else "STAGEKEY"
     items = tuple(
@@ -283,11 +285,12 @@ def _release_artifacts(
                 PlannedOperation.build(
                     sequence=0,
                     resource_type=resource,
-                    action="add",
+                    action=action,
                     target=target,
-                    before_present=False,
-                    after_present=True,
+                    before_present=action == "remove",
+                    after_present=action == "add",
                     version_precondition=PreviewVersion(version=1),
+                    ownership_mutation_id=("owned-add" if action == "remove" else None),
                     reason_codes=(f"test-{number}",),
                 ),
             ),
@@ -327,8 +330,8 @@ def _release_artifacts(
     return preview, request, validation_evidence
 
 
-def _live_authorization(*, resource: str = "tag") -> ReleaseAuthorization:
-    preview, request, validation_evidence = _release_artifacts(resource=resource)
+def _live_authorization(*, resource: str = "tag", action: str = "add") -> ReleaseAuthorization:
+    preview, request, validation_evidence = _release_artifacts(resource=resource, action=action)
     return authorize(
         ReleaseRequest(
             mode=ReleaseMode.LIVE,
@@ -341,17 +344,42 @@ def _live_authorization(*, resource: str = "tag") -> ReleaseAuthorization:
 
 
 def _managed_adapter(
-    fake: InMemoryZoteroHttp, *, resource: str = "tag"
+    fake: InMemoryZoteroHttp, *, resource: str = "tag", action: str = "add"
 ) -> ZoteroHttpMutationAdapter:
     return ZoteroHttpMutationAdapter(
         ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
-        _live_authorization(resource=resource),
+        _live_authorization(resource=resource, action=action),
         transport=fake.read,
         write_transport=fake.write,
     )
 
+
+def _approved_command(
+    *,
+    resource: str = "tag",
+    action: str = "add",
+    item_key: str = "ITEM01",
+    expected_version: int = 1,
+) -> ZoteroMutationCommand:
+    preview, _request, _validation = _release_artifacts(resource=resource, action=action)
+    item = next(value for value in preview.items if value.item_key == item_key)
+    operation = item.operations[0]
+    return ZoteroMutationCommand(
+        operation_id=operation.operation_id,
+        idempotency_key=hashlib.sha256(
+            f"{preview.plan_hash}:{operation.operation_id}".encode()
+        ).hexdigest(),
+        item_key=item.item_key,
+        expected_version=expected_version,
+        resource=operation.resource_type,
+        action=operation.action,
+        target=operation.target,
+        expected_present=operation.before_present,
+        desired_present=operation.after_present,
+    )
+
 def test_managed_http_mutation_requires_authorization_and_verifies_exact_diff() -> None:
-    fake = InMemoryZoteroHttp(_item("ITEM0001", tags=["#human"], collections=["LOOKKEY"]))
+    fake = InMemoryZoteroHttp(_item("ITEM01", tags=["#human"], collections=["LOOKKEY"]))
     config = ZoteroReadConfig(library_type="users", library_id="123", api_key="token")
 
     with pytest.raises(PermissionError, match="ReleaseAuthorization"):
@@ -363,26 +391,14 @@ def test_managed_http_mutation_requires_authorization_and_verifies_exact_diff() 
         )
 
     adapter = _managed_adapter(fake)
-    receipt = adapter.mutate_item(
-        ZoteroMutationCommand(
-            operation_id="op-1",
-            idempotency_key="idempotency-1",
-            item_key="ITEM0001",
-            expected_version=1,
-            resource="tag",
-            action="add",
-            target="#managed",
-            expected_present=False,
-            desired_present=True,
-        )
-    )
+    receipt = adapter.mutate_item(_approved_command())
 
     assert receipt.accepted_version == 2
     assert receipt.provenance is not None
     assert receipt.provenance.target == "#managed"
-    assert fake.writes[0][0].endswith("/items/ITEM0001")
+    assert fake.writes[0][0].endswith("/items/ITEM01")
     assert fake.writes[0][1]["If-Unmodified-Since-Version"] == "1"
-    assert fake.writes[0][1]["Zotero-Write-Token"] == "idempotency-1"
+    assert fake.writes[0][1]["Zotero-Write-Token"] == _approved_command().idempotency_key
     assert {tag["tag"] for tag in fake.writes[0][2]["tags"]} == {"#human", "#managed"}
 
 
@@ -397,55 +413,20 @@ def test_managed_http_mutation_rejects_changes_to_unrelated_item_data() -> None:
             data["extra"] = "unexpected external change"
             return status, request_id
 
-    fake = TamperingZoteroHttp(_item("ITEM0001", tags=["#human"]))
+    fake = TamperingZoteroHttp(_item("ITEM01", tags=["#human"]))
     adapter = _managed_adapter(fake)
 
     with pytest.raises(ZoteroTransportError, match="ZOTERO_EXACT_DIFF_VIOLATION"):
-        adapter.mutate_item(
-            ZoteroMutationCommand(
-                operation_id="op-1",
-                idempotency_key="idempotency-1",
-                item_key="ITEM0001",
-                expected_version=1,
-                resource="tag",
-                action="add",
-                target="#managed",
-                expected_present=False,
-                desired_present=True,
-            )
-        )
+        adapter.mutate_item(_approved_command())
 
 
-def test_managed_http_mutation_rejects_unmanaged_removal_and_external_change() -> None:
-    fake = InMemoryZoteroHttp(_item("ITEM0001", version=2, tags=["#human", "#managed"]))
-    adapter = _managed_adapter(fake)
-    command = ZoteroMutationCommand(
-        operation_id="remove-1",
-        idempotency_key="idempotency-2",
-        item_key="ITEM0001",
-        expected_version=2,
-        resource="tag",
-        action="remove",
-        target="#managed",
-        expected_present=True,
-        desired_present=False,
-    )
+def test_managed_http_mutation_rejects_unmanaged_removal_before_any_write() -> None:
+    fake = InMemoryZoteroHttp(_item("ITEM01", tags=["#human", "#managed"]))
+    adapter = _managed_adapter(fake, action="remove")
+
     with pytest.raises(PermissionError, match="managed provenance"):
-        adapter.mutate_item(command)
+        adapter.mutate_item(_approved_command(action="remove"))
 
-    provenance = ManagedMutationProvenance(
-        operation_id="add-1",
-        idempotency_key="idempotency-add",
-        item_key="ITEM0001",
-        resource="tag",
-        target="#managed",
-        added_version=2,
-    )
-    fake.row["version"] = 3  # Any outside advancement breaks the ownership lineage.
-    with pytest.raises(ZoteroTransportError, match="superseded"):
-        adapter.mutate_item(
-            replace(command, expected_version=3, provenance=provenance)
-        )
     assert fake.writes == []
 
 
@@ -468,13 +449,82 @@ def test_managed_http_mutation_rejects_canonical_tag_outside_snapshot_allowlist(
     fake = InMemoryZoteroHttp(_item("ITEM0001"))
     adapter = _managed_adapter(fake)
 
-    with pytest.raises(PermissionError, match="snapshot allowlist"):
+    with pytest.raises(PermissionError, match="complete approved operation"):
         adapter.mutate_item(
             ZoteroMutationCommand(
                 operation_id="op-1", idempotency_key="id-1", item_key="ITEM0001",
                 expected_version=1, resource="tag", action="add", target="#unreviewed",
                 expected_present=False, desired_present=True,
             )
+        )
+    assert fake.writes == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    (
+        lambda command: replace(command, item_key="ITEM02"),
+        lambda command: replace(command, expected_version=2),
+        lambda command: replace(
+            command, action="remove", expected_present=True, desired_present=False
+        ),
+    ),
+)
+def test_managed_http_mutation_requires_the_complete_approved_identity(
+    change: Callable[[ZoteroMutationCommand], ZoteroMutationCommand],
+) -> None:
+    """A reviewed global tag target cannot authorize a substituted command."""
+    fake = InMemoryZoteroHttp(_item("ITEM01", tags=["#human"]))
+    adapter = _managed_adapter(fake)
+    approved = _approved_command()
+
+    with pytest.raises(PermissionError, match="complete approved operation"):
+        adapter.mutate_item(change(approved))
+
+    assert fake.writes == []
+
+
+def test_http_mutation_adapter_captures_complete_fresh_attempt_evidence() -> None:
+    fake = InMemoryZoteroHttp(
+        _item("ITEM01", version=7, tags=["#human", "#managed"], collections=["LOOKKEY"])
+    )
+    adapter = _managed_adapter(fake)
+    command = _approved_command()
+
+    evidence = adapter.capture_attempt_evidence(
+        operation_id=command.operation_id,
+        idempotency_key=command.idempotency_key,
+        item_key=command.item_key,
+        run_date=date(2026, 8, 11),
+    )
+
+    assert evidence.operation_id == command.operation_id
+    assert evidence.idempotency_key == command.idempotency_key
+    assert evidence.item_key == "ITEM01"
+    assert evidence.item_version == 7
+    assert evidence.tags == ("#human", "#managed")
+    assert evidence.collection_keys == ("LOOKKEY",)
+    assert set(evidence.preserved_field_hashes) == {"raw_item_data", "source"}
+    assert len(evidence.preserved_field_hashes["raw_item_data"]) == 64
+    expected_source = normalize_paper(
+        adapter.read_items(ReadItemsRequest(("ITEM01",)))[0].normalization_mapping(),
+        run_date=date(2026, 8, 11),
+    ).source_fingerprint
+    assert evidence.preserved_field_hashes["source"] == expected_source
+    assert fake.writes == []
+
+
+def test_http_mutation_adapter_rejects_a_reread_for_the_wrong_item() -> None:
+    fake = InMemoryZoteroHttp(_item("OTHER01"))
+    adapter = _managed_adapter(fake)
+    command = _approved_command()
+
+    with pytest.raises(ZoteroTransportError, match="unexpected item"):
+        adapter.capture_attempt_evidence(
+            operation_id=command.operation_id,
+            idempotency_key=command.idempotency_key,
+            item_key=command.item_key,
+            run_date=date(2026, 8, 11),
         )
     assert fake.writes == []
 
@@ -487,7 +537,7 @@ def test_managed_http_mutation_collection_target_must_be_from_snapshot_allowlist
         expected_version=1, resource="collection", action="add", target="OTHERKEY",
         expected_present=False, desired_present=True,
     )
-    with pytest.raises(PermissionError, match="snapshot allowlist"):
+    with pytest.raises(PermissionError, match="complete approved operation"):
         adapter.mutate_item(command)
     assert fake.writes == []
 
@@ -508,7 +558,7 @@ def test_mutation_adapter_rejects_serialized_or_hand_built_capabilities() -> Non
 
 
 def test_persisted_release_factory_binds_adapter_to_ledger_snapshot(tmp_path: Path) -> None:
-    fake = InMemoryZoteroHttp(_item("ITEM0001", tags=["#human"]))
+    fake = InMemoryZoteroHttp(_item("ITEM01", tags=["#human"]))
     preview, request, validation_evidence = _release_artifacts()
     ledger = AuditLedger(tmp_path / "audit.sqlite3")
     ledger.persist_preview_request(preview, request)
@@ -522,19 +572,7 @@ def test_persisted_release_factory_binds_adapter_to_ledger_snapshot(tmp_path: Pa
         transport=fake.read,
         write_transport=fake.write,
     )
-    receipt = adapter.mutate_item(
-        ZoteroMutationCommand(
-            operation_id="persisted-op",
-            idempotency_key="persisted-key",
-            item_key="ITEM0001",
-            expected_version=1,
-            resource="tag",
-            action="add",
-            target="#managed",
-            expected_present=False,
-            desired_present=True,
-        )
-    )
+    receipt = adapter.mutate_item(_approved_command())
 
     assert receipt.accepted_version == 2
     assert fake.writes
