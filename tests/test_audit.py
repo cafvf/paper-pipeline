@@ -88,6 +88,16 @@ def test_canonical_ten_item_preview_is_persisted_and_revalidated(tmp_path: Path)
     assert loaded_preview.plan_hash == preview.plan_hash
     assert loaded_request == request
 
+    with pytest.raises(sqlite3.IntegrityError, match="immutable preview"):
+        ledger.connection.execute(
+            "UPDATE canonical_preview SET preview_id = 'tampered' WHERE plan_hash = ?",
+            (preview.plan_hash,),
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="immutable preview"):
+        ledger.connection.execute(
+            "DELETE FROM canonical_preview WHERE plan_hash = ?", (preview.plan_hash,)
+        )
+
 
 def test_plan_json_round_trip_and_hash_are_canonical() -> None:
     first = plan()

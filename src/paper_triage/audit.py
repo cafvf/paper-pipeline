@@ -235,6 +235,14 @@ class AuditLedger:
             "apply_request_json TEXT NOT NULL, approval_digest TEXT NOT NULL UNIQUE)"
         )
         self._connection.execute(
+            "CREATE TRIGGER IF NOT EXISTS canonical_preview_no_update "
+            "BEFORE UPDATE ON canonical_preview BEGIN SELECT RAISE(ABORT, 'immutable preview'); END"
+        )
+        self._connection.execute(
+            "CREATE TRIGGER IF NOT EXISTS canonical_preview_no_delete "
+            "BEFORE DELETE ON canonical_preview BEGIN SELECT RAISE(ABORT, 'immutable preview'); END"
+        )
+        self._connection.execute(
             "CREATE TABLE IF NOT EXISTS apply_authorization "
             "(authorization_id TEXT PRIMARY KEY, plan_hash TEXT NOT NULL UNIQUE, "
             "reviewed_diff_hash TEXT NOT NULL, approved_item_keys_json TEXT NOT NULL, "
