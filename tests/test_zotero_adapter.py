@@ -9,7 +9,7 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
-from paper_triage.audit import AuditLedger
+from paper_triage.audit import AttemptEvidence, AuditLedger
 from paper_triage.errors import TriageError
 from paper_triage.normalization import normalize_paper
 from paper_triage.plans import (
@@ -480,7 +480,7 @@ def test_managed_http_mutation_rejects_forged_provenance_not_present_in_audit_le
         added_version=1,
     )
 
-    with pytest.raises(PermissionError, match="ledger-derived"):
+    with pytest.raises(PermissionError, match="ledger authorization"):
         adapter.mutate_item(
             replace(
                 _approved_command(action="remove", ownership_mutation_id="a" * 64),
@@ -646,7 +646,7 @@ def test_mutation_adapter_rejects_serialized_or_hand_built_capabilities() -> Non
     assert fake.writes == []
 
 
-def test_persisted_release_factory_binds_adapter_to_ledger_snapshot(tmp_path: Path) -> None:
+def test_persisted_release_factory_rejects_write_without_durable_attempt(tmp_path: Path) -> None:
     fake = InMemoryZoteroHttp(_item("ITEM01", tags=["#human"]))
     preview, request, validation_evidence = _release_artifacts()
     ledger = AuditLedger(tmp_path / "audit.sqlite3")
@@ -661,7 +661,44 @@ def test_persisted_release_factory_binds_adapter_to_ledger_snapshot(tmp_path: Pa
         transport=fake.read,
         write_transport=fake.write,
     )
-    receipt = adapter.mutate_item(_approved_command())
+    with pytest.raises(PermissionError, match="matching durable attempt evidence"):
+        adapter.mutate_item(_approved_command())
+
+    assert fake.writes == []
+
+
+def test_persisted_release_factory_writes_only_after_matching_durable_attempt(
+    tmp_path: Path,
+) -> None:
+    fake = InMemoryZoteroHttp(_item("ITEM01", tags=["#human"]))
+    preview, request, validation_evidence = _release_artifacts()
+    ledger = AuditLedger(tmp_path / "audit.sqlite3")
+    ledger.persist_preview_request(preview, request)
+    authorization_id = ledger.persist_preview_authorization(preview.plan_hash)
+    command = _approved_command()
+    ledger.record_attempt(
+        authorization_id,
+        AttemptEvidence(
+            operation_id=command.operation_id,
+            idempotency_key=command.idempotency_key,
+            item_key=command.item_key,
+            item_version=command.expected_version,
+            tags=("#human",),
+            collection_keys=("LOOKKEY",),
+            preserved_field_hashes={"source": "a" * 64, "non_membership": "b" * 64},
+        ),
+    )
+    adapter = ZoteroHttpMutationAdapter.from_persisted_release(
+        ZoteroReadConfig(library_type="users", library_id="123", api_key="token"),
+        ledger,
+        preview.plan_hash,
+        human_approved=True,
+        validation_evidence=validation_evidence,
+        transport=fake.read,
+        write_transport=fake.write,
+    )
+
+    receipt = adapter.mutate_item(command)
 
     assert receipt.accepted_version == 2
     assert fake.writes

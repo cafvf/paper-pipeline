@@ -432,6 +432,7 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
             raise PermissionError(
                 "Zotero mutation is not a complete approved operation bound to the snapshot"
             )
+        self._validate_durable_attempt(command)
         before_row = self._read_single_raw_item(command.item_key)
         before = _snapshot_from_response(self._config.library_id, before_row)
         if before.item_version != command.expected_version:
@@ -578,6 +579,41 @@ class ZoteroHttpMutationAdapter(ZoteroHttpReadAdapter):
             owned.authorization_id, owned.operation_id
         ) is None:
             raise PermissionError("Zotero removal has no ledger-derived managed provenance")
+
+    def _validate_durable_attempt(self, command: ZoteroMutationCommand) -> None:
+        """Require write-ahead evidence when this adapter is ledger-bound.
+
+        ``from_persisted_release`` is the production construction path.  Its
+        adapter must never turn a valid release capability into an external
+        write before the canonical batch executor has committed ``attempted``.
+        Standalone adapters retain their explicitly narrower, no-ledger use.
+        """
+        if self._ledger is None:
+            return
+        if self._authorization_id is None:
+            raise PermissionError("Zotero mutation requires a ledger authorization")
+        evidence = self._ledger.attempt_evidence_for(
+            self._authorization_id, command.operation_id
+        )
+        latest = next(
+            (
+                entry
+                for entry in reversed(self._ledger.operation_entries_for(self._authorization_id))
+                if entry.operation_id == command.operation_id
+            ),
+            None,
+        )
+        if (
+            evidence is None
+            or evidence.operation_id != command.operation_id
+            or evidence.idempotency_key != command.idempotency_key
+            or evidence.item_key != command.item_key
+            or evidence.item_version != command.expected_version
+            or latest is None
+            or latest.state != "attempted"
+            or latest.expected_version != command.expected_version
+        ):
+            raise PermissionError("Zotero mutation requires matching durable attempt evidence")
 
     @staticmethod
     def _set_membership(payload: dict[str, object], command: ZoteroMutationCommand) -> None:
