@@ -322,6 +322,7 @@ def _is_exact_recovery_diff(
         and after.preserved_field_hashes.get("non_membership")
         == before.preserved_field_hashes.get("non_membership")
         and "non_membership" in before.preserved_field_hashes
+        and "non_membership" in after.preserved_field_hashes
     )
 
 
